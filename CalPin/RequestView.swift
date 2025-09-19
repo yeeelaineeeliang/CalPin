@@ -1,0 +1,731 @@
+//
+//  RequestView.swift
+//  CalPin
+//
+//  Enhanced request submission with urgency levels
+//
+
+import SwiftUI
+import CoreLocation
+import MapKit
+import Alamofire
+import SwiftyJSON
+import Foundation
+
+struct PostDataPayload: Encodable {
+    var caption: String
+    var description: String
+    var address: String
+    var contact: String
+    var urgencyLevel: String
+    var latitude: Double?
+    var longitude: Double?
+}
+
+struct RequestView: View {
+    @ObservedObject var post_obs: post_observer
+    @Binding private var token: String
+    let onRequestCreated: () -> Void
+    
+    @State private var caption: String = ""
+    @State private var description: String = ""
+    @State private var address: String = ""
+    @State private var contact: String = ""
+    @State private var selectedUrgency: UrgencyLevel = .medium
+    @State private var isGettingLocation: Bool = false
+    @State private var currentLocation: CLLocationCoordinate2D?
+    @State private var showingSuccess = false
+    @State private var showingLocationPicker = false
+    
+    private let locationManager = CLLocationManager()
+    @Environment(\.presentationMode) var presentationMode
+    
+    // Color scheme
+    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
+    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
+    private let lightBlue = Color(red: 189/255, green: 229/255, blue: 242/255)
+    
+    init(token: Binding<String>, onRequestCreated: @escaping () -> Void = {}) {
+        _token = token
+        self.onRequestCreated = onRequestCreated
+        post_obs = post_observer(token: self._token.wrappedValue)
+    }
+    
+    var body: some View {
+        NavigationView {
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Header
+                        headerView
+                        
+                        // Form content
+                        formContent
+                        
+                        // Submit button
+                        submitButton
+                    }
+                    .padding()
+                }
+            }
+            .background(lightBlue.opacity(0.3).ignoresSafeArea())
+            .navigationTitle("New Request")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(berkeleyBlue)
+                }
+            }
+        }
+        .alert("Request Submitted!", isPresented: $showingSuccess) {
+            Button("OK") {
+                presentationMode.wrappedValue.dismiss()
+            }
+        } message: {
+            Text("Your help request has been posted and nearby students will be notified.")
+        }
+        .sheet(isPresented: $showingLocationPicker) {
+            LocationPickerView(
+                selectedLocation: $currentLocation,
+                selectedAddress: $address
+            )
+        }
+    }
+    
+    private var headerView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 40))
+                .foregroundColor(californiaGold)
+            
+            Text("Request Help")
+                .font(.title)
+                .fontWeight(.bold)
+                .foregroundColor(berkeleyBlue)
+            
+            Text("Connect with fellow Berkeley students who can help")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.1), radius: 5)
+    }
+    
+    private var formContent: some View {
+        VStack(spacing: 20) {
+            // Title field
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Request Title", systemImage: "text.cursor")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                TextField("e.g., Need help with calculus homework", text: $caption)
+                    .textFieldStyle(CustomTextFieldStyle())
+            }
+            
+            // Description field
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Description", systemImage: "text.alignleft")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                ZStack(alignment: .topLeading) {
+                    if description.isEmpty {
+                        Text("Provide more details about what kind of help you need...")
+                            .foregroundColor(.gray)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                    }
+                    
+                    TextEditor(text: $description)
+                        .frame(minHeight: 100)
+                        .padding(8)
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
+                }
+            }
+            
+            // Urgency level picker
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Urgency Level", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 12) {
+                    ForEach(UrgencyLevel.allCases, id: \.self) { urgency in
+                        UrgencyOptionView(
+                            urgency: urgency,
+                            isSelected: selectedUrgency == urgency
+                        ) {
+                            selectedUrgency = urgency
+                        }
+                    }
+                }
+            }
+            
+            // Location field with enhanced picker
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Location", systemImage: "location")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                VStack(spacing: 12) {
+                    // Address display/input
+                    HStack {
+                        TextField("Enter address or select on map", text: $address)
+                            .textFieldStyle(CustomTextFieldStyle())
+                        
+                        Button(action: getCurrentLocation) {
+                            Image(systemName: isGettingLocation ? "location.circle" : "location.circle.fill")
+                                .foregroundColor(isGettingLocation ? .gray : berkeleyBlue)
+                                .font(.title2)
+                                .rotationEffect(isGettingLocation ? .degrees(360) : .degrees(0))
+                                .animation(isGettingLocation ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isGettingLocation)
+                        }
+                        .disabled(isGettingLocation)
+                    }
+                    
+                    // Map picker button
+                    Button(action: {
+                        showingLocationPicker = true
+                    }) {
+                        HStack {
+                            Image(systemName: "map")
+                            Text("Select on Map")
+                        }
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(berkeleyBlue)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(berkeleyBlue.opacity(0.1))
+                        .cornerRadius(12)
+                    }
+                }
+            }
+            
+            // Contact field
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Contact Information", systemImage: "envelope")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                TextField("Your Berkeley email", text: $contact)
+                    .textFieldStyle(CustomTextFieldStyle())
+                    .keyboardType(.emailAddress)
+                    .autocapitalization(.none)
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.1), radius: 5)
+    }
+    
+    private var submitButton: some View {
+        Button(action: submitRequest) {
+            HStack {
+                if post_obs.isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "paperplane.fill")
+                    Text("Submit Request")
+                        .fontWeight(.semibold)
+                }
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(isFormValid ? californiaGold : Color.gray)
+            .cornerRadius(12)
+            .shadow(color: isFormValid ? californiaGold.opacity(0.3) : .clear, radius: 8, y: 4)
+        }
+        .disabled(!isFormValid || post_obs.isLoading)
+        .padding(.horizontal)
+    }
+    
+    private var isFormValid: Bool {
+        !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !contact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    private func getCurrentLocation() {
+        isGettingLocation = true
+        
+        // Check if location services are available
+        guard CLLocationManager.locationServicesEnabled() else {
+            print("❌ Location services not enabled")
+            isGettingLocation = false
+            return
+        }
+        
+        let manager = CLLocationManager()
+        manager.requestWhenInUseAuthorization()
+        
+        // Check authorization status
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            // Get location
+            if let location = manager.location {
+                currentLocation = location.coordinate
+                print("✅ Got location: \(location.coordinate)")
+                
+                // Reverse geocode to get readable address
+                let geocoder = CLGeocoder()
+                geocoder.reverseGeocodeLocation(location) { placemarks, error in
+                    DispatchQueue.main.async {
+                        if let placemark = placemarks?.first {
+                            let addressComponents = [
+                                placemark.subThoroughfare,
+                                placemark.thoroughfare,
+                                placemark.locality,
+                                placemark.administrativeArea
+                            ].compactMap { $0 }
+                            
+                            self.address = addressComponents.isEmpty ? "Current Location" : addressComponents.joined(separator: ", ")
+                        } else {
+                            self.address = "Current Location"
+                        }
+                        self.isGettingLocation = false
+                    }
+                }
+            } else {
+                print("❌ Could not get current location")
+                self.address = "Current Location"
+                // Set a default Berkeley location for testing
+                self.currentLocation = CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585)
+                self.isGettingLocation = false
+            }
+            
+        case .denied, .restricted:
+            print("❌ Location access denied")
+            // Set a default Berkeley location
+            self.address = "UC Berkeley Campus"
+            self.currentLocation = CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585)
+            self.isGettingLocation = false
+            
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+            // Set a default Berkeley location for now
+            self.address = "UC Berkeley Campus"
+            self.currentLocation = CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585)
+            self.isGettingLocation = false
+            
+        @unknown default:
+            self.isGettingLocation = false
+        }
+    }
+    
+    private func submitRequest() {
+        // If we don't have coordinates, use a default Berkeley location
+        let finalCoordinates = currentLocation ?? CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585)
+        
+        let payload = PostDataPayload(
+            caption: caption.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+            contact: contact.trimmingCharacters(in: .whitespacesAndNewlines),
+            urgencyLevel: selectedUrgency.rawValue,
+            latitude: finalCoordinates.latitude,
+            longitude: finalCoordinates.longitude
+        )
+        
+        print("📍 Debug - Final coordinates: \(finalCoordinates)")
+        
+        post_obs.post(payload: payload) {
+            DispatchQueue.main.async {
+                showingSuccess = true
+                onRequestCreated()
+            }
+        }
+    }
+}
+
+// Location Picker View (Simplified version)
+struct LocationPickerView: View {
+    @Binding var selectedLocation: CLLocationCoordinate2D?
+    @Binding var selectedAddress: String
+    @Environment(\.presentationMode) var presentationMode
+    
+    @State private var region = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585),
+        latitudinalMeters: 2000,
+        longitudinalMeters: 2000
+    )
+    @State private var isGeocodingAddress = false
+    @State private var addressPreview = "Tap and drag to select location"
+    
+    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
+    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                // Map with center pin
+                Map(coordinateRegion: $region)
+                    .ignoresSafeArea()
+                
+                // Center pin indicator
+                VStack {
+                    Spacer()
+                    
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(californiaGold)
+                        .background(
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 20, height: 20)
+                        )
+                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                    
+                    Spacer()
+                    
+                    // Address preview card
+                    VStack(spacing: 16) {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Image(systemName: isGeocodingAddress ? "location.circle" : "location.circle.fill")
+                                    .foregroundColor(berkeleyBlue)
+                                
+                                Text("Selected Location")
+                                    .font(.headline)
+                                    .foregroundColor(berkeleyBlue)
+                                
+                                Spacer()
+                            }
+                            
+                            Text(addressPreview)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(2)
+                        }
+                        
+                        // Action buttons
+                        HStack(spacing: 12) {
+                            Button("Cancel") {
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                            .font(.subheadline)
+                            .foregroundColor(berkeleyBlue)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(berkeleyBlue, lineWidth: 1)
+                            )
+                            
+                            Button("Confirm Location") {
+                                selectedLocation = region.center
+                                selectedAddress = addressPreview == "Tap and drag to select location" ? "Selected Location" : addressPreview
+                                updateAddressForLocation(region.center)
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(californiaGold)
+                            .cornerRadius(12)
+                        }
+                    }
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 10)
+                    .padding()
+                }
+                
+                // Current location button
+                VStack {
+                    HStack {
+                        Spacer()
+                        
+                        Button(action: centerOnCurrentLocation) {
+                            Image(systemName: "location.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                                .padding(12)
+                                .background(berkeleyBlue)
+                                .clipShape(Circle())
+                                .shadow(radius: 4)
+                        }
+                        .padding(.trailing, 20)
+                        .padding(.top, 100)
+                    }
+                    
+                    Spacer()
+                }
+            }
+            .navigationTitle("Select Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+        }
+        .onAppear {
+            // Set initial location if available
+            if let existingLocation = selectedLocation {
+                region.center = existingLocation
+                updateAddressForLocation(existingLocation)
+            }
+        }
+    }
+    
+    private func centerOnCurrentLocation() {
+        let locationManager = CLLocationManager()
+        
+        guard CLLocationManager.locationServicesEnabled() else { return }
+        
+        if let location = locationManager.location {
+            withAnimation(.easeInOut(duration: 1.0)) {
+                region.center = location.coordinate
+            }
+            updateAddressForLocation(location.coordinate)
+        }
+    }
+    
+    private func updateAddressForLocation(_ coordinate: CLLocationCoordinate2D) {
+        isGeocodingAddress = true
+        
+        let geocoder = CLGeocoder()
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        
+        geocoder.reverseGeocodeLocation(location) { placemarks, error in
+            DispatchQueue.main.async {
+                isGeocodingAddress = false
+                
+                if let placemark = placemarks?.first {
+                    let addressComponents = [
+                        placemark.subThoroughfare,
+                        placemark.thoroughfare,
+                        placemark.locality,
+                        placemark.administrativeArea
+                    ].compactMap { $0 }
+                    
+                    addressPreview = addressComponents.isEmpty ? "Unknown Location" : addressComponents.joined(separator: ", ")
+                } else {
+                    addressPreview = "Unknown Location"
+                }
+            }
+        }
+    }
+}
+
+// Custom text field style
+struct CustomTextFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+            )
+    }
+}
+
+// Urgency option view
+struct UrgencyOptionView: View {
+    let urgency: UrgencyLevel
+    let isSelected: Bool
+    let action: () -> Void
+    
+    private var urgencyColor: Color {
+        switch urgency {
+        case .low: return .green
+        case .medium: return .orange
+        case .high: return .red
+        case .urgent: return .purple
+        }
+    }
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(urgencyColor)
+                    .frame(width: 24, height: 24)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white, lineWidth: isSelected ? 3 : 0)
+                    )
+                
+                Text(urgency.rawValue)
+                    .font(.caption)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(isSelected ? urgencyColor : .primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isSelected ? urgencyColor.opacity(0.1) : Color(.systemGray6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isSelected ? urgencyColor : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// Enhanced post observer with better error handling and debugging
+class post_observer: ObservableObject {
+    @Published var isLoading = false
+    @Published var lastError: String?
+    var token: String
+    
+    init(token: String) {
+        self.token = token
+    }
+
+    func post(payload: PostDataPayload, completion: @escaping () -> Void) {
+        isLoading = true
+        lastError = nil
+        
+        print("\n📤 === SUBMITTING REQUEST ===")
+        print("🔑 Token: \(token.prefix(20))...")
+        print("📍 Payload: \(payload)")
+        print("📍 Latitude: \(payload.latitude ?? 0)")
+        print("📍 Longitude: \(payload.longitude ?? 0)")
+        
+        // Validate payload before sending
+        guard !payload.caption.isEmpty,
+              !payload.description.isEmpty,
+              !payload.address.isEmpty,
+              !payload.contact.isEmpty else {
+            print("❌ Payload validation failed - empty fields")
+            self.lastError = "Please fill in all required fields"
+            self.isLoading = false
+            return
+        }
+        
+        guard let lat = payload.latitude,
+              let lon = payload.longitude,
+              lat != 0.0,
+              lon != 0.0 else {
+            print("❌ Payload validation failed - invalid coordinates")
+            self.lastError = "Please select a valid location"
+            self.isLoading = false
+            return
+        }
+        
+        let headers: HTTPHeaders = [
+            "Authorization": "Bearer \(token)",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        ]
+        
+        print("📡 Headers: \(headers)")
+
+        // Use the correct Railway backend URL
+        let url = "https://web-production-aaea1.up.railway.app/api/create"
+        print("🌐 Target URL: \(url)")
+        
+        AF.request(
+            url,
+            method: .post,
+            parameters: payload,
+            encoder: JSONParameterEncoder.default,
+            headers: headers
+        )
+        .validate()
+        .responseData { [weak self] response in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                print("\n📥 === RESPONSE RECEIVED ===")
+                print("📊 Status Code: \(response.response?.statusCode ?? 0)")
+                print("📊 Response Headers: \(response.response?.allHeaderFields ?? [:])")
+                
+                // Log response data
+                if let data = response.data {
+                    print("📊 Response Data Length: \(data.count) bytes")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("📊 Response Body: \(responseString)")
+                    }
+                }
+                
+                switch response.result {
+                case .success(let data):
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("✅ Success response: \(responseString)")
+                    }
+                    self?.lastError = nil
+                    print("✅ Request submitted successfully!")
+                    print("📤 === END SUBMISSION ===\n")
+                    completion()
+                    
+                case .failure(let error):
+                    let errorMsg = "Failed to create request: \(error.localizedDescription)"
+                    self?.lastError = errorMsg
+                    print("❌ Error: \(errorMsg)")
+                    print("❌ Error Code: \(error.responseCode ?? 0)")
+                    
+                    if let data = response.data, let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ Server error response: \(errorString)")
+                    }
+                    
+                    // Check for specific error types
+                    if let afError = error.asAFError {
+                        switch afError {
+                        case .responseValidationFailed(reason: .unacceptableStatusCode(code: let code)):
+                            print("❌ HTTP Status Code: \(code)")
+                        case .sessionTaskFailed(let sessionError):
+                            print("❌ Session Error: \(sessionError.localizedDescription)")
+                        default:
+                            print("❌ AF Error: \(afError.localizedDescription)")
+                        }
+                    }
+                    
+                    print("📤 === END SUBMISSION (ERROR) ===\n")
+                    
+                    // Still call completion to close the view, but show error
+                    completion()
+                }
+            }
+        }
+    }
+    
+    // Test method to verify connectivity
+    func testConnection() {
+        let testURL = "https://web-production-aaea1.up.railway.app/health"
+        
+        AF.request(testURL, method: .get)
+            .responseJSON { response in
+                print("\n🧪 === CONNECTION TEST ===")
+                print("📊 Status: \(response.response?.statusCode ?? 0)")
+                if let data = response.data, let string = String(data: data, encoding: .utf8) {
+                    print("📊 Response: \(string)")
+                }
+                print("🧪 === END TEST ===\n")
+            }
+    }
+}
+
+// Preview
+struct RequestView_Previews: PreviewProvider {
+    static var previews: some View {
+        RequestView(token: .constant("sample_token"))
+    }
+}

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>UIApplicationSceneManifest</key>
+        <dict>
+            <key>UIApplicationSupportsMultipleScenes</key>
+            <true/>
+            <key>UISceneConfigurations</key>
+            <dict/>
+        </dict>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>GIDServerClientID</key>
+	<string>1075849883869-gask7g6j5fvappj1d9dec6tjon2mfmfe.apps.googleusercontent.com</string>
+	<key>GIDClientID</key>
+	<string>1075849883869-2bir2ub34ec7q8rtdghvfr8o1fbjsk3o.apps.googleusercontent.com</string>
+	<key>Application Scene Manifest</key>
+	<dict>
+		<key>Scene Configuration</key>
+		<dict/>
+		<key>Enable Multiple Windows</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLIconFile</key>
+			<string>aaa</string>
+			<key>CFBundleURLName</key>
+			<string>a</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>a</string>
+			</array>
+		</dict>
+		<dict/>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1075849883869-2bir2ub34ec7q8rtdghvfr8o1fbjsk3o</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict/>
+	</array>
+</dict>
+</plist>

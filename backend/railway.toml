@@ -1,0 +1,15 @@
+# Railway deployment configuration for CalPin Backend
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+numReplicas = 1
+sleepApplication = false
+restartPolicyType = "never"
+
+[[services]]
+name = "calpin-backend"
+
+[services.variables]
+NODE_ENV = "production"

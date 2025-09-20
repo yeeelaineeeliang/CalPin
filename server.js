@@ -1,7 +1,8 @@
-// server.js - Enhanced CalPin Backend Server with Debug Logging
+// server.js - Enhanced CalPin Backend Server with Database Integration
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client } = require('google-auth-library');
+const { initDatabase, db } = require('./database'); // Import database functions
 require('dotenv').config();
 
 const app = express();
@@ -47,8 +48,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// In-memory storage (we'll upgrade to a real database later)
-let requests = [
+// Sample requests for fallback (if database fails)
+let fallbackRequests = [
   {
     id: '1',
     title: 'Need Help with Calculus',
@@ -83,10 +84,53 @@ let requests = [
   }
 ];
 
+// Database status
+let databaseConnected = false;
+
+// Initialize database on startup
+async function startServer() {
+  try {
+    console.log('🗄️ Initializing database...');
+    await initDatabase();
+    databaseConnected = true;
+    console.log('✅ Database connected successfully!');
+    
+    // Optionally seed with sample data if database is empty
+    try {
+      const existingRequests = await db.getActiveRequests();
+      if (existingRequests.length === 0) {
+        console.log('📝 Database is empty, adding sample requests...');
+        
+        // Add sample requests to database
+        for (const request of fallbackRequests) {
+          await db.createRequest({
+            title: request.title,
+            description: request.description,
+            latitude: request.latitude,
+            longitude: request.longitude,
+            contact: request.contact,
+            urgencyLevel: request.urgencyLevel,
+            authorId: request.authorId,
+            authorName: request.authorName
+          });
+        }
+        console.log('✅ Sample requests added to database');
+      }
+    } catch (seedError) {
+      console.log('⚠️ Could not seed database:', seedError.message);
+    }
+    
+  } catch (error) {
+    console.error('❌ Database connection failed:', error.message);
+    console.log('⚠️ Falling back to in-memory storage');
+    databaseConnected = false;
+  }
+}
+
 // Utility function to verify Google token
 async function verifyGoogleToken(token) {
   try {
-    console.log('🔐 Verifying Google token...');
+    console.log('🔍 Verifying Google token...');
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -116,8 +160,8 @@ async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.replace('Bearer ', '');
 
-  console.log('🔐 Auth check - Header present:', !!authHeader);
-  console.log('🔐 Auth check - Token extracted:', !!token);
+  console.log('🔍 Auth check - Header present:', !!authHeader);
+  console.log('🔍 Auth check - Token extracted:', !!token);
 
   if (!token) {
     console.log('❌ No token provided');
@@ -150,27 +194,65 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 // Routes
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   console.log('🏥 Health check requested');
+  
+  let requestCount = 0;
+  let dbStatus = 'disconnected';
+  
+  if (databaseConnected) {
+    try {
+      const requests = await db.getActiveRequests();
+      requestCount = requests.length;
+      dbStatus = 'connected';
+    } catch (error) {
+      console.log('⚠️ Database health check failed:', error.message);
+      requestCount = fallbackRequests.length;
+      dbStatus = 'error';
+    }
+  } else {
+    requestCount = fallbackRequests.length;
+  }
+  
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    requests_count: requests.length,
+    requests_count: requestCount,
+    database_status: dbStatus,
     environment: process.env.NODE_ENV || 'development'
   });
 });
 
 // GET /api/fetch - Retrieve all help requests
-app.get('/api/fetch', authenticateToken, (req, res) => {
+app.get('/api/fetch', authenticateToken, async (req, res) => {
   try {
     console.log('📥 Fetching requests for user:', req.user.email);
     
-    // Filter out expired requests (older than 24 hours)
-    const now = new Date();
-    const activeRequests = requests.filter(request => {
-      const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
-      return hoursSinceCreated < 24 && request.status !== 'Cancelled';
-    });
+    let activeRequests = [];
+    
+    if (databaseConnected) {
+      try {
+        console.log('🗄️ Fetching from database...');
+        activeRequests = await db.getActiveRequests();
+        console.log(`✅ Found ${activeRequests.length} requests in database`);
+      } catch (dbError) {
+        console.log('❌ Database fetch failed:', dbError.message);
+        console.log('⚠️ Falling back to in-memory storage');
+        // Filter fallback requests (older than 24 hours)
+        const now = new Date();
+        activeRequests = fallbackRequests.filter(request => {
+          const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
+          return hoursSinceCreated < 24 && request.status !== 'Cancelled';
+        });
+      }
+    } else {
+      console.log('⚠️ Using fallback in-memory storage');
+      const now = new Date();
+      activeRequests = fallbackRequests.filter(request => {
+        const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
+        return hoursSinceCreated < 24 && request.status !== 'Cancelled';
+      });
+    }
 
     // Calculate distances if user location provided
     const userLat = parseFloat(req.query.lat);
@@ -203,13 +285,11 @@ app.get('/api/fetch', authenticateToken, (req, res) => {
 });
 
 // POST /api/create - Create a new help request
-app.post('/api/create', authenticateToken, (req, res) => {
+app.post('/api/create', authenticateToken, async (req, res) => {
   try {
-    console.log('\n🔧 === CREATE REQUEST DEBUG ===');
+    console.log('\n📧 === CREATE REQUEST DEBUG ===');
     console.log('📨 Request received from:', req.user.email);
     console.log('📦 Body received:', JSON.stringify(req.body, null, 2));
-    console.log('📦 Body type:', typeof req.body);
-    console.log('📦 Body constructor:', req.body.constructor.name);
     
     // Handle both direct object and nested object structures
     let requestData = req.body;
@@ -276,30 +356,69 @@ app.post('/api/create', authenticateToken, (req, res) => {
       });
     }
 
-    // Create new request
-    const newRequest = {
-      id: Date.now().toString(), // Simple ID generation
-      title,
-      description,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      contact,
-      urgencyLevel,
-      status: 'Open',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      authorId: req.user.id,
-      authorName: req.user.name,
-      helpersCount: 0,
-      helpers: []
-    };
+    let newRequest;
 
-    // Add to our "database"
-    requests.push(newRequest);
+    if (databaseConnected) {
+      try {
+        console.log('🗄️ Creating request in database...');
+        newRequest = await db.createRequest({
+          title,
+          description,
+          latitude: parseFloat(latitude),
+          longitude: parseFloat(longitude),
+          contact,
+          urgencyLevel,
+          authorId: req.user.id,
+          authorName: req.user.name
+        });
+        console.log('✅ Request created in database with ID:', newRequest.id);
+      } catch (dbError) {
+        console.log('❌ Database create failed:', dbError.message);
+        console.log('⚠️ Falling back to in-memory storage');
+        // Fall back to in-memory storage
+        newRequest = {
+          id: Date.now().toString(),
+          title,
+          description,
+          latitude: parseFloat(latitude),
+          longitude: parseFloat(longitude),
+          contact,
+          urgencyLevel,
+          status: 'Open',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          authorId: req.user.id,
+          authorName: req.user.name,
+          helpersCount: 0,
+          helpers: []
+        };
+        fallbackRequests.push(newRequest);
+      }
+    } else {
+      console.log('⚠️ Using fallback in-memory storage');
+      // Create new request in memory
+      newRequest = {
+        id: Date.now().toString(),
+        title,
+        description,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        contact,
+        urgencyLevel,
+        status: 'Open',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        authorId: req.user.id,
+        authorName: req.user.name,
+        helpersCount: 0,
+        helpers: []
+      };
+      fallbackRequests.push(newRequest);
+    }
 
     console.log('✅ Request created successfully with ID:', newRequest.id);
-    console.log('📊 Total requests now:', requests.length);
-    console.log('🔧 === END CREATE REQUEST DEBUG ===\n');
+    console.log('📊 Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
+    console.log('📧 === END CREATE REQUEST DEBUG ===\n');
 
     res.status(201).json({
       message: 'Request created successfully',
@@ -317,14 +436,30 @@ app.post('/api/create', authenticateToken, (req, res) => {
 });
 
 // POST /api/requests/:id/offer-help - Offer help for a request
-app.post('/api/requests/:id/offer-help', authenticateToken, (req, res) => {
+app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => {
   try {
     const requestId = req.params.id;
     const userId = req.user.id;
 
     console.log('🤝 Offering help - Request ID:', requestId, 'User:', req.user.email);
 
-    const request = requests.find(r => r.id === requestId);
+    if (databaseConnected) {
+      try {
+        const result = await db.offerHelp(requestId, userId, req.user.name);
+        console.log('✅ Help offered successfully via database');
+        res.json({
+          message: 'Help offered successfully',
+          request: result
+        });
+        return;
+      } catch (dbError) {
+        console.log('❌ Database offer help failed:', dbError.message);
+        // Fall through to in-memory handling
+      }
+    }
+
+    // Fallback to in-memory storage
+    const request = fallbackRequests.find(r => r.id === requestId);
     if (!request) {
       return res.status(404).json({ error: 'Request not found' });
     }
@@ -347,7 +482,7 @@ app.post('/api/requests/:id/offer-help', authenticateToken, (req, res) => {
       request.status = 'In Progress';
     }
 
-    console.log('✅ Help offered successfully by:', req.user.name);
+    console.log('✅ Help offered successfully via fallback storage');
 
     res.json({
       message: 'Help offered successfully',
@@ -357,69 +492,6 @@ app.post('/api/requests/:id/offer-help', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('❌ Offer help error:', error);
     res.status(500).json({ error: 'Failed to offer help' });
-  }
-});
-
-// PUT /api/requests/:id/status - Update request status
-app.put('/api/requests/:id/status', authenticateToken, (req, res) => {
-  try {
-    const requestId = req.params.id;
-    const { status } = req.body;
-    const userId = req.user.id;
-
-    console.log('📝 Updating status - Request ID:', requestId, 'New status:', status);
-
-    const request = requests.find(r => r.id === requestId);
-    if (!request) {
-      return res.status(404).json({ error: 'Request not found' });
-    }
-
-    // Only the author can update the status
-    if (request.authorId !== userId) {
-      return res.status(403).json({ error: 'Only the request author can update status' });
-    }
-
-    const validStatuses = ['Open', 'In Progress', 'Completed', 'Cancelled'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
-
-    request.status = status;
-    request.updatedAt = new Date();
-
-    console.log('✅ Status updated successfully to:', status);
-
-    res.json({
-      message: 'Status updated successfully',
-      request: request
-    });
-
-  } catch (error) {
-    console.error('❌ Status update error:', error);
-    res.status(500).json({ error: 'Failed to update status' });
-  }
-});
-
-// GET /api/user/stats - Get user statistics
-app.get('/api/user/stats', authenticateToken, (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    const userRequests = requests.filter(r => r.authorId === userId);
-    const helpedRequests = requests.filter(r => r.helpers.includes(userId));
-    
-    const stats = {
-      requestsMade: userRequests.length,
-      peopleHelped: helpedRequests.length,
-      activeRequests: userRequests.filter(r => r.status === 'Open' || r.status === 'In Progress').length,
-      completedRequests: userRequests.filter(r => r.status === 'Completed').length
-    };
-
-    console.log('📊 User stats for:', req.user.email, stats);
-    res.json(stats);
-  } catch (error) {
-    console.error('❌ Stats error:', error);
-    res.status(500).json({ error: 'Failed to get user stats' });
   }
 });
 
@@ -435,7 +507,8 @@ app.post('/api/test', (req, res) => {
     message: 'Test endpoint reached',
     receivedBody: req.body,
     bodyType: typeof req.body,
-    headers: req.headers
+    headers: req.headers,
+    databaseStatus: databaseConnected ? 'connected' : 'disconnected'
   });
 });
 
@@ -460,11 +533,14 @@ app.use((req, res) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 CalPin Backend running on port ${PORT}`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-  console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
-  console.log(`🔑 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
-  console.log(`📊 Initial requests in memory: ${requests.length}`);
+// Start server with database initialization
+startServer().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 CalPin Backend running on port ${PORT}`);
+    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+    console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
+    console.log(`🔑 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
+    console.log(`🗄️ Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
+    console.log(`📊 Initial requests: ${databaseConnected ? 'In database' : fallbackRequests.length + ' in memory'}`);
+  });
 });

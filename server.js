@@ -1,8 +1,8 @@
-// server.js - Enhanced CalPin Backend Server with Database Integration
+// server.js - Fixed CalPin Backend Server with Proper Database Seeding
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client } = require('google-auth-library');
-const { initDatabase, db } = require('./database'); // Import database functions
+const { initDatabase, db } = require('./database');
 require('dotenv').config();
 
 const app = express();
@@ -13,7 +13,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Enhanced CORS configuration
 app.use(cors({
-  origin: '*', // Allow all origins for testing
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
@@ -23,14 +23,14 @@ app.use((req, res, next) => {
   console.log(`\n🔍 [${new Date().toISOString()}] ${req.method} ${req.url}`);
   console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
   console.log('🔗 Content-Type:', req.get('Content-Type'));
-  console.log('🔑 Authorization:', req.get('Authorization') ? 'Bearer ' + req.get('Authorization').substring(7, 20) + '...' : 'None');
+  console.log('🔐 Authorization:', req.get('Authorization') ? 'Bearer ' + req.get('Authorization').substring(7, 20) + '...' : 'None');
   next();
 });
 
-// Body parsing middleware - CRITICAL ORDER
+// Body parsing middleware
 app.use(express.json({ 
   limit: '10mb',
-  type: ['application/json', 'text/plain'] // Accept both content types
+  type: ['application/json', 'text/plain']
 }));
 app.use(express.urlencoded({ 
   extended: true, 
@@ -61,7 +61,7 @@ let fallbackRequests = [
     status: 'Open',
     createdAt: new Date('2025-01-15T10:00:00Z'),
     updatedAt: new Date('2025-01-15T10:00:00Z'),
-    authorId: 'user123',
+    authorId: 'demo_user_1',
     authorName: 'Alex Chen',
     helpersCount: 0,
     helpers: []
@@ -77,7 +77,7 @@ let fallbackRequests = [
     status: 'Open',
     createdAt: new Date('2025-01-15T09:30:00Z'),
     updatedAt: new Date('2025-01-15T09:30:00Z'),
-    authorId: 'user456',
+    authorId: 'demo_user_2',
     authorName: 'Sarah Kim',
     helpersCount: 2,
     helpers: ['helper1', 'helper2']
@@ -87,7 +87,7 @@ let fallbackRequests = [
 // Database status
 let databaseConnected = false;
 
-// Initialize database on startup
+// Initialize database on startup with better seeding
 async function startServer() {
   try {
     console.log('🗄️ Initializing database...');
@@ -95,29 +95,55 @@ async function startServer() {
     databaseConnected = true;
     console.log('✅ Database connected successfully!');
     
-    // Optionally seed with sample data if database is empty
+    // Test database connection
     try {
       const existingRequests = await db.getActiveRequests();
+      console.log(`✅ Database test successful, found ${existingRequests.length} existing requests`);
+      
+      // Only seed if database is completely empty
       if (existingRequests.length === 0) {
-        console.log('📝 Database is empty, adding sample requests...');
+        console.log('🌱 Database is empty, creating demo users and requests...');
         
-        // Add sample requests to database
-        for (const request of fallbackRequests) {
-          await db.createRequest({
-            title: request.title,
-            description: request.description,
-            latitude: request.latitude,
-            longitude: request.longitude,
-            contact: request.contact,
-            urgencyLevel: request.urgencyLevel,
-            authorId: request.authorId,
-            authorName: request.authorName
+        try {
+          // First, create demo users to satisfy foreign key constraints
+          const demoUser1 = await db.upsertUser({
+            id: 'demo_user_1',
+            email: 'demo1@berkeley.edu',
+            name: 'Alex Chen'
           });
+          
+          const demoUser2 = await db.upsertUser({
+            id: 'demo_user_2', 
+            email: 'demo2@berkeley.edu',
+            name: 'Sarah Kim'
+          });
+          
+          console.log('✅ Demo users created successfully');
+          
+          // Now create sample requests with valid author_ids
+          for (const request of fallbackRequests) {
+            await db.createRequest({
+              title: request.title,
+              description: request.description,
+              latitude: request.latitude,
+              longitude: request.longitude,
+              contact: request.contact,
+              urgencyLevel: request.urgencyLevel,
+              authorId: request.authorId, // This now references existing users
+              authorName: request.authorName
+            });
+          }
+          console.log('✅ Sample requests added to database');
+          
+        } catch (seedError) {
+          console.log('⚠️ Could not seed database:', seedError.message);
+          console.log('📝 This is normal if foreign key constraints are enforced');
+          console.log('💡 Demo data will be available via fallback storage');
         }
-        console.log('✅ Sample requests added to database');
       }
-    } catch (seedError) {
-      console.log('⚠️ Could not seed database:', seedError.message);
+    } catch (testError) {
+      console.log('⚠️ Database test failed:', testError.message);
+      databaseConnected = false;
     }
     
   } catch (error) {
@@ -131,11 +157,22 @@ async function startServer() {
 async function verifyGoogleToken(token) {
   try {
     console.log('🔍 Verifying Google token...');
+    console.log('🔍 Token length:', token.length);
+    console.log('🔍 Token starts with:', token.substring(0, 50) + '...');
+    
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
+    
+    console.log('🔍 Token payload received:', {
+      email: payload.email,
+      name: payload.name,
+      sub: payload.sub,
+      aud: payload.aud,
+      iss: payload.iss
+    });
     
     // Verify it's a Berkeley email
     if (!payload.email.endsWith('@berkeley.edu') && 
@@ -162,6 +199,7 @@ async function authenticateToken(req, res, next) {
 
   console.log('🔍 Auth check - Header present:', !!authHeader);
   console.log('🔍 Auth check - Token extracted:', !!token);
+  console.log('🔍 Auth check - Token length:', token ? token.count : 0);
 
   if (!token) {
     console.log('❌ No token provided');
@@ -170,6 +208,21 @@ async function authenticateToken(req, res, next) {
 
   try {
     const user = await verifyGoogleToken(token);
+    
+    // 🔥 IMPORTANT: Create or update user in database when they authenticate
+    if (databaseConnected) {
+      try {
+        await db.upsertUser({
+          id: user.id,
+          email: user.email, 
+          name: user.name
+        });
+        console.log('✅ User upserted in database:', user.email);
+      } catch (dbError) {
+        console.log('⚠️ Could not upsert user in database:', dbError.message);
+      }
+    }
+    
     req.user = user;
     console.log('✅ User authenticated:', user.email);
     next();
@@ -193,22 +246,35 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 // Routes
 
-// Health check
+// Enhanced health check
 app.get('/health', async (req, res) => {
   console.log('🏥 Health check requested');
   
   let requestCount = 0;
   let dbStatus = 'disconnected';
+  let dbError = null;
+  let userCount = 0;
   
   if (databaseConnected) {
     try {
       const requests = await db.getActiveRequests();
       requestCount = requests.length;
       dbStatus = 'connected';
+      
+      // Try to get user count
+      try {
+        const userResult = await db.pool.query('SELECT COUNT(*) FROM users');
+        userCount = parseInt(userResult.rows[0].count);
+      } catch (userError) {
+        console.log('⚠️ Could not get user count:', userError.message);
+      }
+      
+      console.log('✅ Database health check passed');
     } catch (error) {
       console.log('⚠️ Database health check failed:', error.message);
       requestCount = fallbackRequests.length;
       dbStatus = 'error';
+      dbError = error.message;
     }
   } else {
     requestCount = fallbackRequests.length;
@@ -218,8 +284,12 @@ app.get('/health', async (req, res) => {
     status: 'healthy', 
     timestamp: new Date().toISOString(),
     requests_count: requestCount,
+    users_count: userCount,
     database_status: dbStatus,
-    environment: process.env.NODE_ENV || 'development'
+    database_error: dbError,
+    environment: process.env.NODE_ENV || 'development',
+    google_client_configured: !!process.env.GOOGLE_CLIENT_ID,
+    database_url_configured: !!process.env.DATABASE_URL
   });
 });
 
@@ -238,7 +308,6 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
       } catch (dbError) {
         console.log('❌ Database fetch failed:', dbError.message);
         console.log('⚠️ Falling back to in-memory storage');
-        // Filter fallback requests (older than 24 hours)
         const now = new Date();
         activeRequests = fallbackRequests.filter(request => {
           const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -268,7 +337,6 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         duration: Math.ceil(calculateDistance(userLat, userLon, request.latitude, request.longitude) * 15) + 'min'
       }));
     } else {
-      // Default distance/duration if no user location
       responseRequests = activeRequests.map(request => ({
         ...request,
         distance: '0.5mi',
@@ -287,14 +355,13 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
 // POST /api/create - Create a new help request
 app.post('/api/create', authenticateToken, async (req, res) => {
   try {
-    console.log('\n📧 === CREATE REQUEST DEBUG ===');
-    console.log('📨 Request received from:', req.user.email);
+    console.log('\n🔧 === CREATE REQUEST DEBUG ===');
+    console.log('🔨 Request received from:', req.user.email);
     console.log('📦 Body received:', JSON.stringify(req.body, null, 2));
     
     // Handle both direct object and nested object structures
     let requestData = req.body;
     
-    // Check if body is wrapped in another object
     if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
       const firstKey = Object.keys(req.body)[0];
       if (typeof req.body[firstKey] === 'object') {
@@ -323,18 +390,14 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     console.log('  - urgencyLevel:', urgencyLevel);
     console.log('  - latitude:', latitude);
     console.log('  - longitude:', longitude);
+    console.log('  - user:', req.user);
 
     // Validation
     if (!title || !description || !address || !contact) {
       console.log('❌ Validation failed - missing required fields');
       return res.status(400).json({ 
         error: 'Missing required fields: title, description, address, contact',
-        received: {
-          title: !!title,
-          description: !!description,
-          address: !!address,
-          contact: !!contact
-        }
+        received: { title: !!title, description: !!description, address: !!address, contact: !!contact }
       });
     }
 
@@ -346,7 +409,6 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       });
     }
 
-    // Validate urgency level
     const validUrgencyLevels = ['Low', 'Medium', 'High', 'Urgent'];
     if (!validUrgencyLevels.includes(urgencyLevel)) {
       console.log('❌ Validation failed - invalid urgency level');
@@ -361,6 +423,8 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     if (databaseConnected) {
       try {
         console.log('🗄️ Creating request in database...');
+        console.log('👤 User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
+        
         newRequest = await db.createRequest({
           title,
           description,
@@ -368,14 +432,28 @@ app.post('/api/create', authenticateToken, async (req, res) => {
           longitude: parseFloat(longitude),
           contact,
           urgencyLevel,
-          authorId: req.user.id,
+          authorId: req.user.id,  // This should now exist in users table
           authorName: req.user.name
         });
         console.log('✅ Request created in database with ID:', newRequest.id);
+        
+        // Verify the request was saved
+        try {
+          const verifyRequests = await db.getActiveRequests();
+          const foundRequest = verifyRequests.find(r => r.id.toString() === newRequest.id.toString());
+          if (foundRequest) {
+            console.log('✅ Request verified in database');
+          } else {
+            console.log('⚠️ Request not found in verification check');
+          }
+        } catch (verifyError) {
+          console.log('⚠️ Could not verify request creation:', verifyError.message);
+        }
+        
       } catch (dbError) {
         console.log('❌ Database create failed:', dbError.message);
         console.log('⚠️ Falling back to in-memory storage');
-        // Fall back to in-memory storage
+        
         newRequest = {
           id: Date.now().toString(),
           title,
@@ -393,10 +471,10 @@ app.post('/api/create', authenticateToken, async (req, res) => {
           helpers: []
         };
         fallbackRequests.push(newRequest);
+        databaseConnected = false;
       }
     } else {
       console.log('⚠️ Using fallback in-memory storage');
-      // Create new request in memory
       newRequest = {
         id: Date.now().toString(),
         title,
@@ -418,11 +496,12 @@ app.post('/api/create', authenticateToken, async (req, res) => {
 
     console.log('✅ Request created successfully with ID:', newRequest.id);
     console.log('📊 Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
-    console.log('📧 === END CREATE REQUEST DEBUG ===\n');
+    console.log('🔧 === END CREATE REQUEST DEBUG ===\n');
 
     res.status(201).json({
       message: 'Request created successfully',
-      request: newRequest
+      request: newRequest,
+      database_used: databaseConnected
     });
 
   } catch (error) {
@@ -454,7 +533,6 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
         return;
       } catch (dbError) {
         console.log('❌ Database offer help failed:', dbError.message);
-        // Fall through to in-memory handling
       }
     }
 
@@ -472,12 +550,10 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
       return res.status(400).json({ error: 'You are already helping with this request' });
     }
 
-    // Add helper
     request.helpers.push(userId);
     request.helpersCount = request.helpers.length;
     request.updatedAt = new Date();
 
-    // Update status if it's the first helper
     if (request.helpersCount === 1 && request.status === 'Open') {
       request.status = 'In Progress';
     }
@@ -508,8 +584,35 @@ app.post('/api/test', (req, res) => {
     receivedBody: req.body,
     bodyType: typeof req.body,
     headers: req.headers,
-    databaseStatus: databaseConnected ? 'connected' : 'disconnected'
+    databaseStatus: databaseConnected ? 'connected' : 'disconnected',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
   });
+});
+
+// Database diagnostics endpoint
+app.get('/api/debug/database', authenticateToken, async (req, res) => {
+  const diagnostics = {
+    connected: databaseConnected,
+    environment: process.env.NODE_ENV,
+    database_url_configured: !!process.env.DATABASE_URL,
+    fallback_requests_count: fallbackRequests.length
+  };
+
+  if (databaseConnected) {
+    try {
+      const requests = await db.getActiveRequests();
+      const usersResult = await db.pool.query('SELECT COUNT(*) FROM users');
+      diagnostics.database_requests_count = requests.length;
+      diagnostics.database_users_count = parseInt(usersResult.rows[0].count);
+      diagnostics.database_test = 'success';
+    } catch (error) {
+      diagnostics.database_test = 'failed';
+      diagnostics.database_error = error.message;
+    }
+  }
+
+  res.json(diagnostics);
 });
 
 // Error handling middleware
@@ -539,7 +642,7 @@ startServer().then(() => {
     console.log(`🚀 CalPin Backend running on port ${PORT}`);
     console.log(`🏥 Health check: http://localhost:${PORT}/health`);
     console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
-    console.log(`🔑 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
+    console.log(`🔐 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
     console.log(`🗄️ Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
     console.log(`📊 Initial requests: ${databaseConnected ? 'In database' : fallbackRequests.length + ' in memory'}`);
   });

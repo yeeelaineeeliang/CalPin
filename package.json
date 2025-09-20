@@ -23,7 +23,9 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "google-auth-library": "^9.15.1",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3",
+    "pg-hstore": "^2.3.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

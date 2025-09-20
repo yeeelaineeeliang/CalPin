@@ -1,11 +1,15 @@
-// server.js - Enhanced CalPin Backend Server with Debug Logging
+// server.js - Enhanced CalPin Backend Server with PostgreSQL
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client } = require('google-auth-library');
+const { initDatabase, db } = require('./database');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Initialize database on startup
+initDatabase();
 
 // Google OAuth client for token verification
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -47,42 +51,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// In-memory storage (we'll upgrade to a real database later)
-let requests = [
-  {
-    id: '1',
-    title: 'Need Help with Calculus',
-    description: 'Struggling with integration by parts. Can meet at the library.',
-    latitude: 37.8719,
-    longitude: -122.2585,
-    contact: 'math.help@berkeley.edu',
-    urgencyLevel: 'High',
-    status: 'Open',
-    createdAt: new Date('2025-01-15T10:00:00Z'),
-    updatedAt: new Date('2025-01-15T10:00:00Z'),
-    authorId: 'user123',
-    authorName: 'Alex Chen',
-    helpersCount: 0,
-    helpers: []
-  },
-  {
-    id: '2',
-    title: 'Lost Dog Near Campus',
-    description: 'Golden retriever escaped from apartment. Please help find him!',
-    latitude: 37.8690,
-    longitude: -122.2700,
-    contact: 'dog.owner@berkeley.edu',
-    urgencyLevel: 'Urgent',
-    status: 'Open',
-    createdAt: new Date('2025-01-15T09:30:00Z'),
-    updatedAt: new Date('2025-01-15T09:30:00Z'),
-    authorId: 'user456',
-    authorName: 'Sarah Kim',
-    helpersCount: 2,
-    helpers: ['helper1', 'helper2']
-  }
-];
-
 // Utility function to verify Google token
 async function verifyGoogleToken(token) {
   try {
@@ -100,11 +68,15 @@ async function verifyGoogleToken(token) {
     }
     
     console.log('✅ Token verified for:', payload.email);
-    return {
+    
+    // Upsert user in database
+    const user = await db.upsertUser({
       id: payload.sub,
       email: payload.email,
       name: payload.name
-    };
+    });
+    
+    return user;
   } catch (error) {
     console.log('❌ Token verification failed:', error.message);
     throw new Error('Invalid token');
@@ -150,51 +122,57 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 // Routes
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   console.log('🏥 Health check requested');
-  res.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    requests_count: requests.length,
-    environment: process.env.NODE_ENV || 'development'
-  });
+  try {
+    const requests = await db.getActiveRequests();
+    res.json({ 
+      status: 'healthy', 
+      timestamp: new Date().toISOString(),
+      requests_count: requests.length,
+      environment: process.env.NODE_ENV || 'development',
+      database: 'connected'
+    });
+  } catch (error) {
+    console.error('❌ Health check failed:', error);
+    res.status(500).json({
+      status: 'unhealthy',
+      error: 'Database connection failed',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // GET /api/fetch - Retrieve all help requests
-app.get('/api/fetch', authenticateToken, (req, res) => {
+app.get('/api/fetch', authenticateToken, async (req, res) => {
   try {
     console.log('📥 Fetching requests for user:', req.user.email);
     
-    // Filter out expired requests (older than 24 hours)
-    const now = new Date();
-    const activeRequests = requests.filter(request => {
-      const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
-      return hoursSinceCreated < 24 && request.status !== 'Cancelled';
-    });
+    const requests = await db.getActiveRequests();
 
     // Calculate distances if user location provided
     const userLat = parseFloat(req.query.lat);
     const userLon = parseFloat(req.query.lon);
     
-    let responseRequests = activeRequests;
+    let responseRequests = requests;
     
     if (userLat && userLon) {
       console.log('📍 Calculating distances from user location:', { userLat, userLon });
-      responseRequests = activeRequests.map(request => ({
+      responseRequests = requests.map(request => ({
         ...request,
         distance: calculateDistance(userLat, userLon, request.latitude, request.longitude).toFixed(1) + 'mi',
         duration: Math.ceil(calculateDistance(userLat, userLon, request.latitude, request.longitude) * 15) + 'min'
       }));
     } else {
       // Default distance/duration if no user location
-      responseRequests = activeRequests.map(request => ({
+      responseRequests = requests.map(request => ({
         ...request,
         distance: '0.5mi',
         duration: '5min'
       }));
     }
 
-    console.log('✅ Returning', responseRequests.length, 'active requests');
+    console.log('✅ Returning', responseRequests.length, 'active requests from database');
     res.json(responseRequests);
   } catch (error) {
     console.error('❌ Fetch error:', error);
@@ -203,13 +181,11 @@ app.get('/api/fetch', authenticateToken, (req, res) => {
 });
 
 // POST /api/create - Create a new help request
-app.post('/api/create', authenticateToken, (req, res) => {
+app.post('/api/create', authenticateToken, async (req, res) => {
   try {
     console.log('\n🔧 === CREATE REQUEST DEBUG ===');
     console.log('📨 Request received from:', req.user.email);
     console.log('📦 Body received:', JSON.stringify(req.body, null, 2));
-    console.log('📦 Body type:', typeof req.body);
-    console.log('📦 Body constructor:', req.body.constructor.name);
     
     // Handle both direct object and nested object structures
     let requestData = req.body;
@@ -222,8 +198,6 @@ app.post('/api/create', authenticateToken, (req, res) => {
         requestData = req.body[firstKey];
       }
     }
-    
-    console.log('📦 Final request data:', JSON.stringify(requestData, null, 2));
     
     const {
       caption: title,
@@ -238,11 +212,8 @@ app.post('/api/create', authenticateToken, (req, res) => {
     console.log('📋 Extracted fields:');
     console.log('  - title:', title);
     console.log('  - description:', description);
-    console.log('  - address:', address);
-    console.log('  - contact:', contact);
     console.log('  - urgencyLevel:', urgencyLevel);
-    console.log('  - latitude:', latitude);
-    console.log('  - longitude:', longitude);
+    console.log('  - coordinates:', latitude, longitude);
 
     // Validation
     if (!title || !description || !address || !contact) {
@@ -276,39 +247,33 @@ app.post('/api/create', authenticateToken, (req, res) => {
       });
     }
 
-    // Create new request
-    const newRequest = {
-      id: Date.now().toString(), // Simple ID generation
+    // Create request in database
+    const newRequest = await db.createRequest({
       title,
       description,
       latitude: parseFloat(latitude),
       longitude: parseFloat(longitude),
       contact,
       urgencyLevel,
-      status: 'Open',
-      createdAt: new Date(),
-      updatedAt: new Date(),
       authorId: req.user.id,
-      authorName: req.user.name,
-      helpersCount: 0,
-      helpers: []
-    };
+      authorName: req.user.name
+    });
 
-    // Add to our "database"
-    requests.push(newRequest);
-
-    console.log('✅ Request created successfully with ID:', newRequest.id);
-    console.log('📊 Total requests now:', requests.length);
+    console.log('✅ Request created in database with ID:', newRequest.id);
     console.log('🔧 === END CREATE REQUEST DEBUG ===\n');
 
     res.status(201).json({
       message: 'Request created successfully',
-      request: newRequest
+      request: {
+        ...newRequest,
+        id: newRequest.id.toString(),
+        helpersCount: 0,
+        helpers: []
+      }
     });
 
   } catch (error) {
     console.error('❌ Create error:', error);
-    console.error('❌ Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to create request',
       details: error.message 
@@ -317,14 +282,17 @@ app.post('/api/create', authenticateToken, (req, res) => {
 });
 
 // POST /api/requests/:id/offer-help - Offer help for a request
-app.post('/api/requests/:id/offer-help', authenticateToken, (req, res) => {
+app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => {
   try {
-    const requestId = req.params.id;
+    const requestId = parseInt(req.params.id);
     const userId = req.user.id;
 
     console.log('🤝 Offering help - Request ID:', requestId, 'User:', req.user.email);
 
-    const request = requests.find(r => r.id === requestId);
+    // Check if request exists and user isn't the author
+    const requests = await db.getActiveRequests();
+    const request = requests.find(r => r.id === requestId.toString());
+    
     if (!request) {
       return res.status(404).json({ error: 'Request not found' });
     }
@@ -333,65 +301,46 @@ app.post('/api/requests/:id/offer-help', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Cannot offer help on your own request' });
     }
 
-    if (request.helpers.includes(userId)) {
-      return res.status(400).json({ error: 'You are already helping with this request' });
-    }
-
-    // Add helper
-    request.helpers.push(userId);
-    request.helpersCount = request.helpers.length;
-    request.updatedAt = new Date();
-
-    // Update status if it's the first helper
-    if (request.helpersCount === 1 && request.status === 'Open') {
-      request.status = 'In Progress';
-    }
+    await db.offerHelp(requestId, userId, req.user.name);
 
     console.log('✅ Help offered successfully by:', req.user.name);
 
-    res.json({
-      message: 'Help offered successfully',
-      request: request
-    });
+    res.json({ message: 'Help offered successfully' });
 
   } catch (error) {
+    if (error.code === '23505') { // Unique constraint violation
+      return res.status(400).json({ error: 'You are already helping with this request' });
+    }
     console.error('❌ Offer help error:', error);
     res.status(500).json({ error: 'Failed to offer help' });
   }
 });
 
 // PUT /api/requests/:id/status - Update request status
-app.put('/api/requests/:id/status', authenticateToken, (req, res) => {
+app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
   try {
-    const requestId = req.params.id;
+    const requestId = parseInt(req.params.id);
     const { status } = req.body;
     const userId = req.user.id;
 
     console.log('📝 Updating status - Request ID:', requestId, 'New status:', status);
-
-    const request = requests.find(r => r.id === requestId);
-    if (!request) {
-      return res.status(404).json({ error: 'Request not found' });
-    }
-
-    // Only the author can update the status
-    if (request.authorId !== userId) {
-      return res.status(403).json({ error: 'Only the request author can update status' });
-    }
 
     const validStatuses = ['Open', 'In Progress', 'Completed', 'Cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    request.status = status;
-    request.updatedAt = new Date();
+    const updatedRequest = await db.updateRequestStatus(requestId, status, userId);
+    
+    if (!updatedRequest) {
+      return res.status(404).json({ error: 'Request not found or unauthorized' });
+    }
 
     console.log('✅ Status updated successfully to:', status);
 
     res.json({
       message: 'Status updated successfully',
-      request: request
+      request: updatedRequest
     });
 
   } catch (error) {
@@ -401,20 +350,9 @@ app.put('/api/requests/:id/status', authenticateToken, (req, res) => {
 });
 
 // GET /api/user/stats - Get user statistics
-app.get('/api/user/stats', authenticateToken, (req, res) => {
+app.get('/api/user/stats', authenticateToken, async (req, res) => {
   try {
-    const userId = req.user.id;
-    
-    const userRequests = requests.filter(r => r.authorId === userId);
-    const helpedRequests = requests.filter(r => r.helpers.includes(userId));
-    
-    const stats = {
-      requestsMade: userRequests.length,
-      peopleHelped: helpedRequests.length,
-      activeRequests: userRequests.filter(r => r.status === 'Open' || r.status === 'In Progress').length,
-      completedRequests: userRequests.filter(r => r.status === 'Completed').length
-    };
-
+    const stats = await db.getUserStats(req.user.id);
     console.log('📊 User stats for:', req.user.email, stats);
     res.json(stats);
   } catch (error) {
@@ -466,5 +404,5 @@ app.listen(PORT, () => {
   console.log(`🏥 Health check: http://localhost:${PORT}/health`);
   console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
   console.log(`🔑 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
-  console.log(`📊 Initial requests in memory: ${requests.length}`);
+  console.log(`💾 Database: PostgreSQL connected`);
 });

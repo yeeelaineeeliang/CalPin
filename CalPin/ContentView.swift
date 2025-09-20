@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  CalPin
 //
-//  Enhanced main view with improved state management and user experience
+//  Clean production main view without debug elements
 //
 
 import SwiftUI
@@ -19,14 +19,14 @@ struct ContentView: View {
     @State private var userName = ""
     @State private var userEmail = ""
     
-    // Shared observer for data consistency
+    // Single observer for data consistency
     @StateObject private var sharedObserver = observer(token: "")
     
     // UI State
     @State private var showingHelp = false
     @State private var isLoading = false
-    @State private var cardOffset: CGFloat = 300 // How far up the card is pulled
-    @State private var cardHeight: CGFloat = 300 // Current card height
+    @State private var cardOffset: CGFloat = 300
+    @State private var cardHeight: CGFloat = 300
     @State private var isDragging = false
     
     // Color scheme
@@ -44,27 +44,36 @@ struct ContentView: View {
                     signInView
                 }
                 
-                // Loading overlay
                 if isLoading {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
                         .overlay(
-                            ProgressView("Signing in...")
-                                .padding()
-                                .background(Color.white)
-                                .cornerRadius(12)
-                                .shadow(radius: 10)
+                            VStack {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(1.5)
+                                
+                                Text("Signing in...")
+                                    .foregroundColor(.white)
+                                    .padding(.top)
+                            }
+                            .padding()
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(12)
+                            .shadow(radius: 10)
                         )
                 }
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .onChange(of: token) { newToken in
-            // Update shared observer token when user signs in
+            print("🔄 Token changed in ContentView")
             sharedObserver.token = newToken
             if !newToken.isEmpty {
-                // Fetch initial data when user signs in
-                sharedObserver.fetchData()
+                print("✅ New token set, triggering initial fetch...")
+                sharedObserver.fetchData {
+                    print("✅ Initial data loaded after sign in")
+                }
             }
         }
     }
@@ -72,50 +81,72 @@ struct ContentView: View {
     private var mainAppView: some View {
         ZStack {
             // Map view using shared observer
-            SharedMapView(
-                token: $token,
-                selectedPlace: $selectedPlace,
-                observer: sharedObserver
-            )
-            .ignoresSafeArea(.all)
+            MapView(token: $token, selectedPlace: $selectedPlace, observer: sharedObserver)
+                .ignoresSafeArea(.all)
             
-            // Profile button at top-left
+            // Profile button at top-left - cleaned up, no debug button
             VStack {
                 HStack {
                     Button(action: { showingProfile.toggle() }) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(berkeleyBlue)
-                            .padding(12)
-                            .background(Color.white)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
+                        VStack(spacing: 4) {
+                            Image(systemName: "person.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(berkeleyBlue)
+                            
+                            Text(userName.components(separatedBy: " ").first ?? "User")
+                                .font(.caption2)
+                                .foregroundColor(berkeleyBlue)
+                        }
+                        .padding(8)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .shadow(radius: 4)
                     }
                     .padding(.leading, 20)
                     .padding(.top, 20)
                     
                     Spacer()
                 }
-                
                 Spacer()
             }
             
             // Add request button in bottom-right
             VStack {
                 Spacer()
-                
                 HStack {
                     Spacer()
                     
-                    Button(action: { showingRequestView.toggle() }) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.white)
-                            .background(californiaGold)
-                            .clipShape(Circle())
-                            .shadow(radius: 8)
+                    VStack(spacing: 12) {
+                        // Data refresh indicator
+                        if sharedObserver.isLoading {
+                            Button(action: {}) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
+                                    .scaleEffect(0.8)
+                                    .padding(8)
+                                    .background(Color.white)
+                                    .clipShape(Circle())
+                                    .shadow(radius: 4)
+                            }
+                            .disabled(true)
+                        }
+                        
+                        // Main add button
+                        Button(action: {
+                            print("➕ Add request button tapped")
+                            showingRequestView.toggle()
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.largeTitle)
+                                .foregroundColor(.white)
+                                .background(californiaGold)
+                                .clipShape(Circle())
+                                .shadow(radius: 8)
+                        }
+                        .scaleEffect(1.1)
+                        .disabled(token.isEmpty)
+                        .opacity(token.isEmpty ? 0.6 : 1.0)
                     }
-                    .scaleEffect(1.1)
                 }
             }
             .padding(.trailing, 20)
@@ -124,7 +155,6 @@ struct ContentView: View {
             // Draggable bottom card using shared observer
             VStack {
                 Spacer()
-                
                 DraggableCardView(
                     selectedPlace: $selectedPlace,
                     places: sharedObserver.datas,
@@ -135,15 +165,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingRequestView) {
             RequestView(token: $token) {
-                // Refresh shared observer when new request is created
-                print("🔄 Request created, refreshing data...")
-                sharedObserver.forceRefresh()
-                
-                // Also post notification for any other observers
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("RefreshMapData"),
-                    object: nil
-                )
+                handleRequestCreated()
             }
         }
         .sheet(isPresented: $showingProfile) {
@@ -266,10 +288,13 @@ struct ContentView: View {
         )
     }
     
+    // Enhanced sign-in handler
     func handleSignInButton() {
+        print("🔐 Sign-in button tapped")
         isLoading = true
         
         guard let presentingViewController = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.windows.first?.rootViewController else {
+            print("❌ Could not get presenting view controller")
             isLoading = false
             return
         }
@@ -283,28 +308,62 @@ struct ContentView: View {
                     return
                 }
                 
-                // Extract user information
                 let user = result.user
                 userName = user.profile?.name ?? "Berkeley Student"
                 userEmail = user.profile?.email ?? ""
                 token = user.idToken?.tokenString ?? ""
                 
-                // Verify it's a Berkeley email
+                print("✅ Sign-in successful!")
+                print("👤 User name: \(userName)")
+                print("📧 User email: \(userEmail)")
+                print("🔑 Token length: \(token.count)")
+                
+                // Check if we actually got a token
+                if token.isEmpty {
+                    print("🚨 WARNING: Token is empty!")
+                    return
+                } else {
+                    print("🔑 Token received successfully")
+                }
+                
+                // Verify Berkeley email
                 if userEmail.hasSuffix("@berkeley.edu") || userEmail.hasSuffix("@student.berkeley.edu") {
+                    print("✅ Berkeley email verified")
                     withAnimation(.easeInOut(duration: 0.5)) {
                         isSignedIn = true
                     }
-                    print("✅ Successfully signed in: \(userName)")
                 } else {
-                    // Handle non-Berkeley email
-                    print("⚠️ Non-Berkeley email detected: \(userEmail)")
-                    // You might want to show an alert here
+                    print("❌ Non-Berkeley email: \(userEmail)")
                 }
             }
         }
     }
     
+    // Enhanced request creation handler
+    private func handleRequestCreated() {
+        print("🔄 Request created callback triggered")
+        
+        // Immediate refresh
+        DispatchQueue.main.async {
+            print("📱 Triggering immediate data refresh...")
+            self.sharedObserver.fetchData {
+                print("✅ Data refreshed after request creation")
+                print("📊 New data count: \(self.sharedObserver.datas.count)")
+            }
+        }
+        
+        // Also schedule a delayed refresh to catch any database delays
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            print("🔄 Triggering delayed refresh...")
+            self.sharedObserver.fetchData {
+                print("✅ Delayed refresh completed")
+                print("📊 Final data count: \(self.sharedObserver.datas.count)")
+            }
+        }
+    }
+    
     func handleSignOut() {
+        print("👋 Sign out initiated")
         GIDSignIn.sharedInstance.signOut()
         withAnimation(.easeInOut(duration: 0.5)) {
             isSignedIn = false
@@ -314,184 +373,11 @@ struct ContentView: View {
             selectedPlace = nil
             sharedObserver.datas = [] // Clear observer data
         }
-        print("👋 User signed out")
+        print("✅ User signed out successfully")
     }
 }
 
-// Shared MapView component that uses the passed observer
-struct SharedMapView: View {
-    @Binding var token: String
-    @Binding var selectedPlace: Place?
-    @ObservedObject var observer: observer
-    
-    @State private var isRefreshing = false
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 37.87271049717549, longitude: -122.26090632933469),
-        latitudinalMeters: 3000,
-        longitudinalMeters: 3000
-    )
-    @State private var userLocation: CLLocationCoordinate2D?
-    @State private var showingLocationAlert = false
-    
-    private let locationManager = CLLocationManager()
-    
-    // Sample pin for demo purposes
-    let samplePin = Place(
-        title: "Need Study Buddy for Finals",
-        coordinate: CLLocationCoordinate2D(latitude: 37.87271049717549, longitude: -122.26090632933469),
-        description: "Looking for someone to study with for upcoming finals. I have reserved a study room at the library.",
-        contact: "study@berkeley.edu",
-        distance: "0.0mi",
-        duration: "0min",
-        urgencyLevel: .medium,
-        status: .open,
-        createdAt: Date().addingTimeInterval(-1800), // 30 minutes ago
-        authorName: "Demo User",
-        helpersCount: 1
-    )
-    
-    private var allAnnotations: [Place] {
-        [samplePin] + observer.datas
-    }
-    
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Map(coordinateRegion: $region,
-                showsUserLocation: true,
-                annotationItems: allAnnotations) { place in
-                MapAnnotation(coordinate: place.coordinate) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            self.selectedPlace = place
-                        }
-                    }) {
-                        EnhancedPinView(
-                            place: place,
-                            isSelected: selectedPlace?.id == place.id
-                        )
-                    }
-                }
-            }
-            .onAppear {
-                setupLocationServices()
-                refreshData()
-            }
-            .onChange(of: token) { newToken in
-                if !newToken.isEmpty {
-                    refreshData()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshMapData"))) { _ in
-                refreshData()
-            }
-            
-            // Map controls
-            VStack(spacing: 12) {
-                // Refresh button
-                Button(action: refreshData) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                        .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
-                        .animation(isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
-                }
-                .disabled(isRefreshing)
-                
-                // Center on user location button
-                Button(action: centerOnUserLocation) {
-                    Image(systemName: "location.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                }
-                
-                // Filter button
-                Button(action: {
-                    // TODO: Implement filter options
-                }) {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                }
-            }
-            .padding(.trailing, 16)
-            .padding(.top, 60)
-        }
-        .alert("Location Access", isPresented: $showingLocationAlert) {
-            Button("Settings") {
-                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(settingsUrl)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("CalPin needs location access to show nearby help requests and your current position.")
-        }
-    }
-    
-    private func setupLocationServices() {
-        locationManager.requestWhenInUseAuthorization()
-        
-        switch locationManager.authorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways:
-            if let location = locationManager.location {
-                userLocation = location.coordinate
-                withAnimation {
-                    region.center = location.coordinate
-                }
-            }
-        case .denied, .restricted:
-            showingLocationAlert = true
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-        @unknown default:
-            break
-        }
-    }
-    
-    private func centerOnUserLocation() {
-        guard let userLocation = userLocation else {
-            setupLocationServices()
-            return
-        }
-        
-        withAnimation(.easeInOut(duration: 1.0)) {
-            region.center = userLocation
-        }
-    }
-    
-    private func refreshData() {
-        guard !token.isEmpty else {
-            print("⚠️ No token available for refresh")
-            return
-        }
-        
-        isRefreshing = true
-        selectedPlace = nil
-        
-        print("🔄 Refreshing map data...")
-        
-        observer.fetchData {
-            DispatchQueue.main.async {
-                self.isRefreshing = false
-                print("✅ Map data refreshed, found \(self.observer.datas.count) requests")
-            }
-        }
-    }
-}
-
-// Feature card component (same as before)
+// Feature card component
 struct FeatureCard: View {
     let icon: String
     let title: String
@@ -521,61 +407,177 @@ struct FeatureCard: View {
     }
 }
 
-// Profile view and other components remain the same...
+// Enhanced Profile view with better stats
 struct ProfileView: View {
     let userName: String
     let userEmail: String
     let onSignOut: () -> Void
     @Environment(\.presentationMode) var presentationMode
     
+    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
+    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
+    
     var body: some View {
         NavigationView {
-            VStack(spacing: 24) {
-                // Profile header
-                VStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(.blue)
-                    
-                    Text(userName)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    
-                    Text(userEmail)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .cornerRadius(20)
-                
-                // Stats section (placeholder)
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Your Impact")
-                        .font(.headline)
-                        .fontWeight(.bold)
-                    
-                    HStack {
-                        StatCard(title: "Requests Made", value: "3", icon: "hand.raised")
-                        StatCard(title: "People Helped", value: "7", icon: "heart.fill")
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Profile header
+                    VStack(spacing: 16) {
+                        // Avatar
+                        Circle()
+                            .fill(berkeleyBlue.opacity(0.1))
+                            .frame(width: 100, height: 100)
+                            .overlay(
+                                Text(String(userName.prefix(1)).uppercased())
+                                    .font(.largeTitle)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(berkeleyBlue)
+                            )
+                        
+                        VStack(spacing: 4) {
+                            Text(userName)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(berkeleyBlue)
+                            
+                            Text(userEmail)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            // Berkeley verification badge
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.shield.fill")
+                                    .foregroundColor(.green)
+                                Text("Berkeley Verified")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(12)
+                        }
                     }
-                }
-                
-                Spacer()
-                
-                // Sign out button
-                Button(action: onSignOut) {
-                    Text("Sign Out")
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 8)
+                    
+                    // Stats section
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "chart.bar.fill")
+                                .foregroundColor(californiaGold)
+                            Text("Your Impact")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(berkeleyBlue)
+                        }
+                        
+                        HStack(spacing: 16) {
+                            StatCard(
+                                title: "Requests Made",
+                                value: "3",
+                                icon: "hand.raised.fill",
+                                color: .blue
+                            )
+                            
+                            StatCard(
+                                title: "People Helped",
+                                value: "7",
+                                icon: "heart.fill",
+                                color: .red
+                            )
+                        }
+                        
+                        HStack(spacing: 16) {
+                            StatCard(
+                                title: "Community Points",
+                                value: "42",
+                                icon: "star.fill",
+                                color: californiaGold
+                            )
+                            
+                            StatCard(
+                                title: "This Week",
+                                value: "2",
+                                icon: "calendar",
+                                color: .green
+                            )
+                        }
+                    }
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 8)
+                    
+                    // Settings section
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "gearshape.fill")
+                                .foregroundColor(berkeleyBlue)
+                            Text("Settings")
+                                .font(.headline)
+                                .fontWeight(.bold)
+                                .foregroundColor(berkeleyBlue)
+                        }
+                        
+                        VStack(spacing: 0) {
+                            SettingsRow(
+                                icon: "bell.fill",
+                                title: "Notifications",
+                                subtitle: "Manage your alert preferences"
+                            )
+                            
+                            Divider()
+                                .padding(.leading, 40)
+                            
+                            SettingsRow(
+                                icon: "location.fill",
+                                title: "Privacy",
+                                subtitle: "Control your location sharing"
+                            )
+                            
+                            Divider()
+                                .padding(.leading, 40)
+                            
+                            SettingsRow(
+                                icon: "questionmark.circle.fill",
+                                title: "Help & Support",
+                                subtitle: "Get help or report issues"
+                            )
+                        }
+                        .background(Color.white)
+                        .cornerRadius(12)
+                    }
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 8)
+                    
+                    Spacer(minLength: 20)
+                    
+                    // Sign out button
+                    Button(action: onSignOut) {
+                        HStack {
+                            Image(systemName: "arrow.right.square")
+                            Text("Sign Out")
+                        }
                         .font(.headline)
-                        .foregroundColor(.red)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.red.opacity(0.1))
+                        .background(Color.red)
                         .cornerRadius(12)
+                        .shadow(color: .red.opacity(0.3), radius: 8, y: 4)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 40)
                 }
-                .padding(.bottom)
+                .padding()
             }
-            .padding()
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(true)
@@ -584,27 +586,31 @@ struct ProfileView: View {
                     Button("Done") {
                         presentationMode.wrappedValue.dismiss()
                     }
+                    .foregroundColor(berkeleyBlue)
+                    .fontWeight(.semibold)
                 }
             }
         }
     }
 }
 
-// Stat card component
+// Enhanced stat card component
 struct StatCard: View {
     let title: String
     let value: String
     let icon: String
+    let color: Color
     
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundColor(.blue)
+                .foregroundColor(color)
             
             Text(value)
                 .font(.title)
                 .fontWeight(.bold)
+                .foregroundColor(.primary)
             
             Text(title)
                 .font(.caption)
@@ -615,6 +621,45 @@ struct StatCard: View {
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+    }
+}
+
+// Settings row component
+struct SettingsRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(.blue)
+                .frame(width: 24, height: 24)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .background(Color.white)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Handle settings tap
+            print("Settings tapped: \(title)")
+        }
     }
 }
 

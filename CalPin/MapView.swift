@@ -2,13 +2,14 @@
 //  MapView.swift
 //  CalPin
 //
-//  Enhanced map view with improved pin visualization and interactions
+//  Clean production map view without debug elements
 //
 
 import SwiftUI
 import MapKit
 import Alamofire
 import SwiftyJSON
+import Foundation
 
 func createPlace(from json: [String: Any]) -> Place? {
     guard
@@ -18,6 +19,8 @@ func createPlace(from json: [String: Any]) -> Place? {
         let description = json["description"] as? String,
         let contact = json["contact"] as? String
     else {
+        print("❌ Failed to parse place - missing required fields")
+        print("📦 JSON: \(json)")
         return nil
     }
 
@@ -71,7 +74,7 @@ struct MapView: View {
     @State private var isRefreshing = false
     @Binding var token: String
     @Binding var selectedPlace: Place?
-    @StateObject private var requestObserver: observer // Changed to @StateObject
+    @ObservedObject var obs: observer
     @State private var annotations: [Place]
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 37.87271049717549, longitude: -122.26090632933469),
@@ -80,31 +83,18 @@ struct MapView: View {
     )
     @State private var userLocation: CLLocationCoordinate2D?
     @State private var showingLocationAlert = false
+    @State private var lastRefreshTime = Date()
+    @State private var refreshTimer: Timer?
     
     private let locationManager = CLLocationManager()
-    
-    // Sample pin for demo purposes
-    let samplePin = Place(
-        title: "Need Study Buddy for Finals",
-        coordinate: CLLocationCoordinate2D(latitude: 37.87271049717549, longitude: -122.26090632933469),
-        description: "Looking for someone to study with for upcoming finals. I have reserved a study room at the library.",
-        contact: "study@berkeley.edu",
-        distance: "0.0mi",
-        duration: "0min",
-        urgencyLevel: .medium,
-        status: .open,
-        createdAt: Date().addingTimeInterval(-1800), // 30 minutes ago
-        authorName: "Demo User",
-        helpersCount: 1
-    )
 
-    init(token: Binding<String>, selectedPlace: Binding<Place?>) {
+    init(token: Binding<String>, selectedPlace: Binding<Place?>, observer: observer) {
         self._token = token
         self._selectedPlace = selectedPlace
-        self._requestObserver = StateObject(wrappedValue: observer(token: token.wrappedValue))
+        self.obs = observer
         _annotations = State(initialValue: [])
     }
-
+    
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Map(coordinateRegion: $region,
@@ -125,57 +115,44 @@ struct MapView: View {
             }
             .onAppear {
                 setupLocationServices()
-                requestObserver.token = token // Update token
                 refreshData()
+                startAutoRefresh()
+            }
+            .onDisappear {
+                stopAutoRefresh()
             }
             .onChange(of: token) { newToken in
-                // Update observer token when user signs in/out
-                requestObserver.token = newToken
+                print("🔄 Token changed, refreshing data...")
                 if !newToken.isEmpty {
                     refreshData()
                 }
             }
-            .onReceive(requestObserver.$datas) { newData in
-                // Update annotations when data changes
-                updateAnnotations()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshMapData"))) { _ in
-                // Listen for refresh notifications from request creation
-                refreshData()
-            }
             
-            // Map controls - 3 buttons (refresh, location, filter)
+            // Map controls - cleaned up, no debug button
             VStack(spacing: 12) {
-                // Refresh button
+                // Refresh button with status indicator
                 Button(action: refreshData) {
-                    Image(systemName: isRefreshing ? "arrow.clockwise" : "arrow.clockwise")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                        .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
-                        .animation(isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+                    VStack(spacing: 2) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                            .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
+                            .animation(isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+                        
+                        Text("\(annotations.count)")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                    .padding(8)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .shadow(radius: 4)
                 }
                 .disabled(isRefreshing)
+                .opacity(isRefreshing ? 0.6 : 1.0)
                 
-                // Center on user location button
                 Button(action: centerOnUserLocation) {
                     Image(systemName: "location.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                }
-                
-                // Filter button
-                Button(action: {
-                    // TODO: Implement filter options
-                }) {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
                         .font(.title2)
                         .foregroundColor(.blue)
                         .padding(12)
@@ -231,36 +208,53 @@ struct MapView: View {
         }
     }
     
+    private func startAutoRefresh() {
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
+            if !token.isEmpty && !isRefreshing {
+                print("⏰ Auto-refreshing data...")
+                refreshData()
+            }
+        }
+    }
+    
+    private func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+    
     private func refreshData() {
         guard !token.isEmpty else {
-            print("⚠️ No token available for refresh")
+            print("⚠️ Cannot refresh - no token available")
             return
         }
         
         isRefreshing = true
         selectedPlace = nil
+        lastRefreshTime = Date()
         
-        print("🔄 Refreshing map data...")
+        print("🔄 Manual refresh initiated...")
         
-        requestObserver.fetchData {
+        obs.fetchData {
             DispatchQueue.main.async {
                 self.isRefreshing = false
                 self.updateAnnotations()
-                print("✅ Map data refreshed, found \(self.requestObserver.datas.count) requests")
+                print("✅ Refresh completed - \(self.annotations.count) total pins")
             }
         }
     }
     
     private func updateAnnotations() {
-        // Always include sample pin for demo + fetched data
-        let allPlaces = [samplePin] + requestObserver.datas
+        // Only use fetched data - no sample pin
+        let allPlaces = obs.datas
         
         // Only update if annotations actually changed to prevent unnecessary re-renders
         if !areAnnotationsEqual(annotations, allPlaces) {
             withAnimation(.easeInOut(duration: 0.3)) {
                 annotations = allPlaces
             }
-            print("📍 Updated map with \(allPlaces.count) pins")
+            print("📍 Updated map with \(allPlaces.count) pins from server")
+        } else {
+            print("📍 No changes in annotations")
         }
     }
     
@@ -382,17 +376,22 @@ struct EnhancedPinView: View {
     }
 }
 
-// Enhanced observer class with better state management
+// Enhanced observer class with better state management and debugging
 class observer: ObservableObject {
     @Published var datas = [Place]()
     @Published var isLoading = false
     @Published var lastRefresh: Date?
     @Published var errorMessage: String?
+    @Published var lastDatabaseStatus: String = "unknown"
     
     var token: String {
         didSet {
             if token != oldValue {
-                print("🔑 Observer token updated")
+                print("🔑 Observer token updated (length: \(token.count))")
+                if !token.isEmpty {
+                    // Auto-fetch when token is set
+                    fetchData {}
+                }
             }
         }
     }
@@ -400,10 +399,10 @@ class observer: ObservableObject {
     init(token: String) {
         self.token = token
     }
-
-    func fetchData(completion: @escaping () -> Void = {}) {
+    
+    func fetchData(completion: @escaping () -> Void) {
         guard !token.isEmpty else {
-            print("⚠️ Cannot fetch data: No token provided")
+            print("❌ Cannot fetch data - token is empty")
             completion()
             return
         }
@@ -411,68 +410,87 @@ class observer: ObservableObject {
         isLoading = true
         errorMessage = nil
         
+        // Clear the array at the start
+        self.datas.removeAll()
+        
+        let fullURL = "\(NetworkConfig.baseURL)\(NetworkConfig.endpoints.fetch)"
+        print("🌐 Attempting to fetch from: \(fullURL)")
+        print("🔑 Using token length: \(token.count)")
+        
         let headers: HTTPHeaders = [
             "Authorization": "Bearer \(token)",
             "Content-Type": "application/json"
         ]
         
-        print("🌐 Fetching data from server...")
-        
-        AF.request(
-            "https://web-production-aaea1.up.railway.app/api/fetch",
-            method: .get,
-            headers: headers
-        )
-        .validate()
-        .responseJSON { [weak self] response in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                
-                switch response.result {
-                case .success(let value):
-                    let json = JSON(value)
-                    var newRequests: [Place] = []
-                    
-                    // Handle both array and object responses
-                    if json.type == .array {
-                        for subJson in json.arrayValue {
-                            if let placeData = subJson.dictionaryObject,
-                               let place = createPlace(from: placeData) {
-                                newRequests.append(place)
-                            }
-                        }
-                    } else {
-                        for (_, subJson): (String, JSON) in json {
-                            if let placeData = subJson.dictionaryObject,
-                               let place = createPlace(from: placeData) {
-                                newRequests.append(place)
-                            }
-                        }
-                    }
-                    
-                    self?.datas = newRequests
+        AF.request(fullURL, method: .get, headers: headers)
+            .validate()
+            .responseJSON { [weak self] response in
+                DispatchQueue.main.async {
+                    self?.isLoading = false
                     self?.lastRefresh = Date()
-                    self?.errorMessage = nil
                     
-                    print("✅ Successfully fetched \(newRequests.count) requests")
-                    completion()
+                    print("📊 Response status: \(response.response?.statusCode ?? 0)")
                     
-                case .failure(let error):
-                    let errorMsg = "Failed to fetch requests: \(error.localizedDescription)"
-                    self?.errorMessage = errorMsg
-                    print("❌ Error fetching data: \(errorMsg)")
-                    
-                    // Keep existing data on error
-                    completion()
+                    switch response.result {
+                    case .success(let value):
+                        let json = JSON(value)
+                        print("📊 Raw response: \(json)")
+                        
+                        // Process each request only once
+                        if let requestsArray = json.array {
+                            var newPlaces: [Place] = []
+                            for requestJson in requestsArray {
+                                if let placeData = requestJson.dictionaryObject,
+                                   let place = createPlace(from: placeData) {
+                                    newPlaces.append(place)
+                                }
+                            }
+                            
+                            self?.datas = newPlaces
+                            print("✅ Fetched \(newPlaces.count) requests")
+                            
+                            // Extract database status from response if available
+                            if let responseData = response.data,
+                               let responseString = String(data: responseData, encoding: .utf8) {
+                                if responseString.contains("database_used") {
+                                    self?.lastDatabaseStatus = "connected"
+                                } else {
+                                    self?.lastDatabaseStatus = "fallback"
+                                }
+                            }
+                        } else {
+                            print("⚠️ Response is not an array")
+                            self?.errorMessage = "Invalid response format"
+                        }
+                        
+                        completion()
+                        
+                    case .failure(let error):
+                        print("❌ Network error: \(error.localizedDescription)")
+                        if let data = response.data, let errorString = String(data: data, encoding: .utf8) {
+                            print("❌ Server response: \(errorString)")
+                        }
+                        self?.errorMessage = error.localizedDescription
+                        completion()
+                    }
                 }
             }
-        }
     }
     
-    // Add method to force refresh
-    func forceRefresh() {
-        print("🔄 Force refreshing data...")
-        fetchData()
+    // Test method to verify connectivity
+    func testConnection() {
+        let testURL = "\(NetworkConfig.baseURL)/health"
+        print("🧪 Testing connection to: \(testURL)")
+        
+        AF.request(testURL, method: .get)
+            .responseJSON { response in
+                print("\n🧪 === CONNECTION TEST ===")
+                print("📊 Status: \(response.response?.statusCode ?? 0)")
+                if let data = response.data, let string = String(data: data, encoding: .utf8) {
+                    print("📊 Response: \(string)")
+                }
+                print("🧪 === END TEST ===\n")
+            }
     }
 }
 
@@ -481,7 +499,8 @@ struct MapView_Previews: PreviewProvider {
     static var previews: some View {
         MapView(
             token: .constant("sample_token"),
-            selectedPlace: .constant(nil)
+            selectedPlace: .constant(nil),
+            observer: observer(token: "sample_token")
         )
     }
 }

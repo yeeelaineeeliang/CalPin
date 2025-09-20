@@ -20,6 +20,8 @@
 		714493362B01F905002AC7D1 /* InformationCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 714493352B01F905002AC7D1 /* InformationCardView.swift */; };
 		714493382B02B5B8002AC7D1 /* RequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 714493372B02B5B8002AC7D1 /* RequestView.swift */; };
 		7144933A2B02C30F002AC7D1 /* Place.swift in Sources */ = {isa = PBXBuildFile; fileRef = 714493392B02C30F002AC7D1 /* Place.swift */; };
+		71D8BA4C2E7F5CE4004E0371 /* APIConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D8BA4B2E7F5CE4004E0371 /* APIConfig.swift */; };
+		71D8BA4E2E7F635F004E0371 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 71D8BA4D2E7F635F004E0371 /* GoogleService-Info.plist */; };
 		71E16B012E73FB78005311A6 /* DraggableCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71E16B002E73FB70005311A6 /* DraggableCardView.swift */; };
 		91321EC22B0401DA00075305 /* CustomPinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91321EC12B0401DA00075305 /* CustomPinView.swift */; };
 		91321EC42B04028600075305 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91321EC32B04028600075305 /* CardView.swift */; };
@@ -37,6 +39,8 @@
 		714493352B01F905002AC7D1 /* InformationCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InformationCardView.swift; sourceTree = "<group>"; };
 		714493372B02B5B8002AC7D1 /* RequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestView.swift; sourceTree = "<group>"; };
 		714493392B02C30F002AC7D1 /* Place.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Place.swift; sourceTree = "<group>"; };
+		71D8BA4B2E7F5CE4004E0371 /* APIConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfig.swift; sourceTree = "<group>"; };
+		71D8BA4D2E7F635F004E0371 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		71E16B002E73FB70005311A6 /* DraggableCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraggableCardView.swift; sourceTree = "<group>"; };
 		91321EC12B0401DA00075305 /* CustomPinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomPinView.swift; sourceTree = "<group>"; };
 		91321EC32B04028600075305 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
@@ -76,6 +80,8 @@
 		10CEB4852ABFA7B100EDEC7D /* CalPin */ = {
 			isa = PBXGroup;
 			children = (
+				71D8BA4D2E7F635F004E0371 /* GoogleService-Info.plist */,
+				71D8BA4B2E7F5CE4004E0371 /* APIConfig.swift */,
 				10CEB4862ABFA7B100EDEC7D /* CalPinApp.swift */,
 				10CEB4882ABFA7B100EDEC7D /* ContentView.swift */,
 				10CEB48A2ABFA7B200EDEC7D /* Assets.xcassets */,
@@ -172,6 +178,7 @@
 			files = (
 				10CEB48E2ABFA7B200EDEC7D /* Preview Assets.xcassets in Resources */,
 				10CEB48B2ABFA7B200EDEC7D /* Assets.xcassets in Resources */,
+				71D8BA4E2E7F635F004E0371 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,6 +191,7 @@
 			files = (
 				71E16B012E73FB78005311A6 /* DraggableCardView.swift in Sources */,
 				10CEB49F2ABFB27600EDEC7D /* viewController.swift in Sources */,
+				71D8BA4C2E7F5CE4004E0371 /* APIConfig.swift in Sources */,
 				91321EC42B04028600075305 /* CardView.swift in Sources */,
 				1072D9B12AC7852300C2AA69 /* MapView.swift in Sources */,
 				714493382B02B5B8002AC7D1 /* RequestView.swift in Sources */,

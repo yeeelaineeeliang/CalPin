@@ -1,4 +1,4 @@
-// server.js - Fixed CalPin Backend Server with Proper Database Seeding
+// server.js - Clean CalPin Backend Server without sample data
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client } = require('google-auth-library');
@@ -48,46 +48,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Sample requests for fallback (if database fails)
-let fallbackRequests = [
-  {
-    id: '1',
-    title: 'Need Help with Calculus',
-    description: 'Struggling with integration by parts. Can meet at the library.',
-    latitude: 37.8719,
-    longitude: -122.2585,
-    contact: 'math.help@berkeley.edu',
-    urgencyLevel: 'High',
-    status: 'Open',
-    createdAt: new Date('2025-01-15T10:00:00Z'),
-    updatedAt: new Date('2025-01-15T10:00:00Z'),
-    authorId: 'demo_user_1',
-    authorName: 'Alex Chen',
-    helpersCount: 0,
-    helpers: []
-  },
-  {
-    id: '2',
-    title: 'Lost Dog Near Campus',
-    description: 'Golden retriever escaped from apartment. Please help find him!',
-    latitude: 37.8690,
-    longitude: -122.2700,
-    contact: 'dog.owner@berkeley.edu',
-    urgencyLevel: 'Urgent',
-    status: 'Open',
-    createdAt: new Date('2025-01-15T09:30:00Z'),
-    updatedAt: new Date('2025-01-15T09:30:00Z'),
-    authorId: 'demo_user_2',
-    authorName: 'Sarah Kim',
-    helpersCount: 2,
-    helpers: ['helper1', 'helper2']
-  }
-];
+// Fallback requests for in-memory storage (only used if database fails)
+let fallbackRequests = [];
 
 // Database status
 let databaseConnected = false;
 
-// Initialize database on startup with better seeding
+// Initialize database on startup - clean version without sample data
 async function startServer() {
   try {
     console.log('🗄️ Initializing database...');
@@ -99,48 +66,7 @@ async function startServer() {
     try {
       const existingRequests = await db.getActiveRequests();
       console.log(`✅ Database test successful, found ${existingRequests.length} existing requests`);
-      
-      // Only seed if database is completely empty
-      if (existingRequests.length === 0) {
-        console.log('🌱 Database is empty, creating demo users and requests...');
-        
-        try {
-          // First, create demo users to satisfy foreign key constraints
-          const demoUser1 = await db.upsertUser({
-            id: 'demo_user_1',
-            email: 'demo1@berkeley.edu',
-            name: 'Alex Chen'
-          });
-          
-          const demoUser2 = await db.upsertUser({
-            id: 'demo_user_2', 
-            email: 'demo2@berkeley.edu',
-            name: 'Sarah Kim'
-          });
-          
-          console.log('✅ Demo users created successfully');
-          
-          // Now create sample requests with valid author_ids
-          for (const request of fallbackRequests) {
-            await db.createRequest({
-              title: request.title,
-              description: request.description,
-              latitude: request.latitude,
-              longitude: request.longitude,
-              contact: request.contact,
-              urgencyLevel: request.urgencyLevel,
-              authorId: request.authorId, // This now references existing users
-              authorName: request.authorName
-            });
-          }
-          console.log('✅ Sample requests added to database');
-          
-        } catch (seedError) {
-          console.log('⚠️ Could not seed database:', seedError.message);
-          console.log('📝 This is normal if foreign key constraints are enforced');
-          console.log('💡 Demo data will be available via fallback storage');
-        }
-      }
+      console.log('🎯 Ready to accept new requests from users');
     } catch (testError) {
       console.log('⚠️ Database test failed:', testError.message);
       databaseConnected = false;
@@ -199,7 +125,7 @@ async function authenticateToken(req, res, next) {
 
   console.log('🔍 Auth check - Header present:', !!authHeader);
   console.log('🔍 Auth check - Token extracted:', !!token);
-  console.log('🔍 Auth check - Token length:', token ? token.count : 0);
+  console.log('🔍 Auth check - Token length:', token ? token.length : 0);
 
   if (!token) {
     console.log('❌ No token provided');
@@ -209,7 +135,7 @@ async function authenticateToken(req, res, next) {
   try {
     const user = await verifyGoogleToken(token);
     
-    // 🔥 IMPORTANT: Create or update user in database when they authenticate
+    // Create or update user in database when they authenticate
     if (databaseConnected) {
       try {
         await db.upsertUser({
@@ -432,7 +358,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
           longitude: parseFloat(longitude),
           contact,
           urgencyLevel,
-          authorId: req.user.id,  // This should now exist in users table
+          authorId: req.user.id,
           authorName: req.user.name
         });
         console.log('✅ Request created in database with ID:', newRequest.id);
@@ -644,6 +570,6 @@ startServer().then(() => {
     console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
     console.log(`🔐 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
     console.log(`🗄️ Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
-    console.log(`📊 Initial requests: ${databaseConnected ? 'In database' : fallbackRequests.length + ' in memory'}`);
+    console.log(`📊 Ready for user requests`);
   });
 });

@@ -601,49 +601,19 @@ class post_observer: ObservableObject {
 
     func post(payload: PostDataPayload, completion: @escaping () -> Void) {
         isLoading = true
-        lastError = nil
         
-        print("\n📤 === SUBMITTING REQUEST ===")
-        print("🔑 Token: \(token.prefix(20))...")
-        print("📍 Payload: \(payload)")
-        print("📍 Latitude: \(payload.latitude ?? 0)")
-        print("📍 Longitude: \(payload.longitude ?? 0)")
-        
-        // Validate payload before sending
-        guard !payload.caption.isEmpty,
-              !payload.description.isEmpty,
-              !payload.address.isEmpty,
-              !payload.contact.isEmpty else {
-            print("❌ Payload validation failed - empty fields")
-            self.lastError = "Please fill in all required fields"
-            self.isLoading = false
-            return
-        }
-        
-        guard let lat = payload.latitude,
-              let lon = payload.longitude,
-              lat != 0.0,
-              lon != 0.0 else {
-            print("❌ Payload validation failed - invalid coordinates")
-            self.lastError = "Please select a valid location"
-            self.isLoading = false
-            return
-        }
+        print("🔍 Debug - Token: \(token)")
+        print("🔍 Debug - Payload: \(payload)")
+        print("🔍 Debug - Posting to: \(NetworkConfig.baseURL)\(NetworkConfig.endpoints.create)")
         
         let headers: HTTPHeaders = [
             "Authorization": "Bearer \(token)",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Content-Type": "application/json"
         ]
-        
-        print("📡 Headers: \(headers)")
 
-        // Use the correct Railway backend URL
-        let url = "https://web-production-aaea1.up.railway.app/api/create"
-        print("🌐 Target URL: \(url)")
-        
+        // ✅ Using NetworkConfig instead of APIConfig
         AF.request(
-            url,
+            "\(NetworkConfig.baseURL)\(NetworkConfig.endpoints.create)",
             method: .post,
             parameters: payload,
             encoder: JSONParameterEncoder.default,
@@ -654,53 +624,20 @@ class post_observer: ObservableObject {
             DispatchQueue.main.async {
                 self?.isLoading = false
                 
-                print("\n📥 === RESPONSE RECEIVED ===")
-                print("📊 Status Code: \(response.response?.statusCode ?? 0)")
-                print("📊 Response Headers: \(response.response?.allHeaderFields ?? [:])")
-                
-                // Log response data
-                if let data = response.data {
-                    print("📊 Response Data Length: \(data.count) bytes")
-                    if let responseString = String(data: data, encoding: .utf8) {
-                        print("📊 Response Body: \(responseString)")
-                    }
-                }
+                print("🔍 Debug - Response status: \(response.response?.statusCode ?? 0)")
                 
                 switch response.result {
                 case .success(let data):
                     if let responseString = String(data: data, encoding: .utf8) {
                         print("✅ Success response: \(responseString)")
                     }
-                    self?.lastError = nil
-                    print("✅ Request submitted successfully!")
-                    print("📤 === END SUBMISSION ===\n")
                     completion()
-                    
                 case .failure(let error):
-                    let errorMsg = "Failed to create request: \(error.localizedDescription)"
-                    self?.lastError = errorMsg
-                    print("❌ Error: \(errorMsg)")
-                    print("❌ Error Code: \(error.responseCode ?? 0)")
-                    
+                    print("❌ Error: \(error)")
+                    print("❌ Error description: \(error.localizedDescription)")
                     if let data = response.data, let errorString = String(data: data, encoding: .utf8) {
-                        print("❌ Server error response: \(errorString)")
+                        print("❌ Server error: \(errorString)")
                     }
-                    
-                    // Check for specific error types
-                    if let afError = error.asAFError {
-                        switch afError {
-                        case .responseValidationFailed(reason: .unacceptableStatusCode(code: let code)):
-                            print("❌ HTTP Status Code: \(code)")
-                        case .sessionTaskFailed(let sessionError):
-                            print("❌ Session Error: \(sessionError.localizedDescription)")
-                        default:
-                            print("❌ AF Error: \(afError.localizedDescription)")
-                        }
-                    }
-                    
-                    print("📤 === END SUBMISSION (ERROR) ===\n")
-                    
-                    // Still call completion to close the view, but show error
                     completion()
                 }
             }
@@ -709,7 +646,7 @@ class post_observer: ObservableObject {
     
     // Test method to verify connectivity
     func testConnection() {
-        let testURL = "https://web-production-aaea1.up.railway.app/health"
+        let testURL = "https://calpin-production.up.railway.app/health"
         
         AF.request(testURL, method: .get)
             .responseJSON { response in

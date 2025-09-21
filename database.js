@@ -119,7 +119,7 @@ const db = {
     
     const result = await pool.query(`
       SELECT r.*, 
-             COALESCE(h.helpers_count, 0) as helpers_count
+            COALESCE(h.helpers_count, 0) as helpers_count
       FROM help_requests r
       LEFT JOIN (
         SELECT request_id, COUNT(*) as helpers_count
@@ -127,7 +127,7 @@ const db = {
         GROUP BY request_id
       ) h ON r.id = h.request_id
       WHERE r.created_at > NOW() - INTERVAL '24 hours'
-        AND r.status != 'Cancelled'
+        AND r.status NOT IN ('Completed', 'Cancelled')
       ORDER BY r.created_at DESC
     `);
     
@@ -144,22 +144,22 @@ const db = {
       `);
       console.log(`📊 Recent requests (24h): ${recentResult.rows[0].count}`);
       
-      const cancelledResult = await pool.query(`
-        SELECT COUNT(*) FROM help_requests 
-        WHERE status = 'Cancelled'
+      // 🔥 NEW: Check status distribution
+      const statusResult = await pool.query(`
+        SELECT status, COUNT(*) as count
+        FROM help_requests 
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        GROUP BY status
       `);
-      console.log(`📊 Cancelled requests: ${cancelledResult.rows[0].count}`);
+      console.log('📊 Status distribution:', statusResult.rows);
     }
     
     const mappedResults = result.rows.map(row => {
       console.log('🔧 Processing row:', {
         id: row.id,
         title: row.title,
-        latitude: row.latitude,
-        longitude: row.longitude,
-        lat_type: typeof row.latitude,
-        lng_type: typeof row.longitude,
         status: row.status,
+        helpers_count: row.helpers_count,
         created_at: row.created_at
       });
       
@@ -167,12 +167,11 @@ const db = {
         id: row.id.toString(),
         title: row.title,
         description: row.description,
-        // 🔥 IMPORTANT: Ensure coordinates are properly converted to numbers
         latitude: parseFloat(row.latitude),
         longitude: parseFloat(row.longitude),
         contact: row.contact,
         urgencyLevel: row.urgency_level,
-        status: row.status,
+        status: row.status, // 🔥 IMPORTANT: This will now include "In Progress"
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         authorId: row.author_id,
@@ -182,6 +181,11 @@ const db = {
     });
     
     console.log(`✅ Returning ${mappedResults.length} mapped requests`);
+    console.log('📊 Status breakdown:', mappedResults.reduce((acc, req) => {
+      acc[req.status] = (acc[req.status] || 0) + 1;
+      return acc;
+    }, {}));
+    
     return mappedResults;
   },
 

@@ -743,6 +743,146 @@ app.get('/api/debug/database', authenticateToken, async (req, res) => {
   res.json(diagnostics);
 });
 
+// 🔥 NEW: Debug endpoint to check database state
+app.get('/api/debug/requests', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔧 Debug endpoint called by:', req.user.email);
+    
+    if (!databaseConnected) {
+      return res.json({
+        error: 'Database not connected',
+        fallback_requests: fallbackRequests.length,
+        requests: fallbackRequests
+      });
+    }
+
+    // Check total requests
+    const totalResult = await db.pool.query('SELECT COUNT(*) FROM help_requests');
+    const totalCount = parseInt(totalResult.rows[0].count);
+
+    // Check recent requests
+    const recentResult = await db.pool.query(`
+      SELECT id, title, latitude, longitude, status, created_at, author_name
+      FROM help_requests 
+      ORDER BY created_at DESC 
+      LIMIT 10
+    `);
+
+    // Check active requests (same query as getActiveRequests)
+    const activeResult = await db.pool.query(`
+      SELECT r.*, 
+             COALESCE(h.helpers_count, 0) as helpers_count
+      FROM help_requests r
+      LEFT JOIN (
+        SELECT request_id, COUNT(*) as helpers_count
+        FROM help_offers
+        GROUP BY request_id
+      ) h ON r.id = h.request_id
+      WHERE r.created_at > NOW() - INTERVAL '24 hours'
+        AND r.status != 'Cancelled'
+      ORDER BY r.created_at DESC
+    `);
+
+    // Check if coordinates are valid
+    const coordinateCheck = await db.pool.query(`
+      SELECT id, title, latitude, longitude,
+             CASE 
+               WHEN latitude IS NULL THEN 'NULL'
+               WHEN latitude::text = '' THEN 'EMPTY'
+               WHEN latitude = 0 THEN 'ZERO'
+               ELSE 'VALID'
+             END as lat_status,
+             CASE 
+               WHEN longitude IS NULL THEN 'NULL'
+               WHEN longitude::text = '' THEN 'EMPTY'
+               WHEN longitude = 0 THEN 'ZERO'
+               ELSE 'VALID'
+             END as lng_status
+      FROM help_requests 
+      ORDER BY created_at DESC 
+      LIMIT 5
+    `);
+
+    res.json({
+      database_connected: databaseConnected,
+      total_requests: totalCount,
+      active_requests_count: activeResult.rows.length,
+      recent_requests: recentResult.rows.map(row => ({
+        id: row.id,
+        title: row.title,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        status: row.status,
+        created_at: row.created_at,
+        author_name: row.author_name
+      })),
+      active_requests: activeResult.rows.map(row => ({
+        id: row.id,
+        title: row.title,
+        latitude: parseFloat(row.latitude),
+        longitude: parseFloat(row.longitude),
+        status: row.status,
+        helpers_count: row.helpers_count
+      })),
+      coordinate_validation: coordinateCheck.rows,
+      query_timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('❌ Debug endpoint error:', error);
+    res.status(500).json({ 
+      error: 'Debug failed',
+      message: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// 🔥 NEW: Simplified test endpoint to check basic functionality
+app.get('/api/test-fetch', authenticateToken, async (req, res) => {
+  try {
+    console.log('🧪 Test fetch called');
+    
+    if (databaseConnected) {
+      // Simple direct query without complex joins
+      const result = await db.pool.query(`
+        SELECT id, title, latitude, longitude, status, created_at
+        FROM help_requests 
+        WHERE status != 'Cancelled'
+        ORDER BY created_at DESC
+        LIMIT 5
+      `);
+      
+      console.log(`🧪 Direct query returned ${result.rows.length} rows`);
+      
+      const simpleMapped = result.rows.map(row => ({
+        id: row.id.toString(),
+        title: row.title,
+        latitude: parseFloat(row.latitude),
+        longitude: parseFloat(row.longitude),
+        status: row.status,
+        distance: '0.5mi',
+        duration: '5min',
+        description: 'Test request',
+        contact: 'test@berkeley.edu',
+        urgencyLevel: 'Medium',
+        createdAt: row.created_at,
+        authorName: 'Test User',
+        helpersCount: 0,
+        isCurrentUserHelping: false
+      }));
+      
+      res.json(simpleMapped);
+    } else {
+      res.json([]);
+    }
+    
+  } catch (error) {
+    console.error('❌ Test fetch error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('🚨 Server error:', error);

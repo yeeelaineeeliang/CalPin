@@ -1,7 +1,6 @@
-// database.js - Database setup and operations
+// database.js - Fixed coordinate handling
 require('dotenv').config();
 const { Pool } = require('pg');
-
 
 // Database connection
 const pool = new Pool({
@@ -22,7 +21,7 @@ async function initDatabase() {
       );
     `);
 
-    // Create help_requests table
+    // Create help_requests table with proper coordinate types
     await pool.query(`
       CREATE TABLE IF NOT EXISTS help_requests (
         id SERIAL PRIMARY KEY,
@@ -82,25 +81,42 @@ const db = {
     return result.rows[0];
   },
 
-  // Create help request
+  // Create help request with proper coordinate handling
   async createRequest(requestData) {
     const {
       title, description, latitude, longitude, contact,
       urgencyLevel, authorId, authorName
     } = requestData;
     
+    console.log('🔧 Creating request with coordinates:', { latitude, longitude });
+    console.log('🔧 Coordinate types:', typeof latitude, typeof longitude);
+    
+    // Ensure coordinates are properly converted to numbers
+    const lat = typeof latitude === 'string' ? parseFloat(latitude) : latitude;
+    const lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
+    
+    console.log('🔧 Converted coordinates:', { lat, lng });
+    
+    if (isNaN(lat) || isNaN(lng)) {
+      throw new Error(`Invalid coordinates: lat=${lat}, lng=${lng}`);
+    }
+    
     const result = await pool.query(
       `INSERT INTO help_requests 
        (title, description, latitude, longitude, contact, urgency_level, author_id, author_name)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [title, description, latitude, longitude, contact, urgencyLevel, authorId, authorName]
+      [title, description, lat, lng, contact, urgencyLevel, authorId, authorName]
     );
+    
+    console.log('✅ Request created in database:', result.rows[0]);
     return result.rows[0];
   },
 
-  // Get active requests
+  // 🔥 FIXED: Get active requests with better debugging
   async getActiveRequests() {
+    console.log('🔍 Querying for active requests...');
+    
     const result = await pool.query(`
       SELECT r.*, 
              COALESCE(h.helpers_count, 0) as helpers_count
@@ -115,21 +131,58 @@ const db = {
       ORDER BY r.created_at DESC
     `);
     
-    return result.rows.map(row => ({
-      id: row.id.toString(),
-      title: row.title,
-      description: row.description,
-      latitude: parseFloat(row.latitude),
-      longitude: parseFloat(row.longitude),
-      contact: row.contact,
-      urgencyLevel: row.urgency_level,
-      status: row.status,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      authorId: row.author_id,
-      authorName: row.author_name,
-      helpersCount: parseInt(row.helpers_count) || 0
-    }));
+    console.log(`🔍 Raw query result: ${result.rows.length} rows`);
+    
+    if (result.rows.length === 0) {
+      console.log('⚠️ No rows found, checking total requests...');
+      const totalResult = await pool.query('SELECT COUNT(*) FROM help_requests');
+      console.log(`📊 Total requests in database: ${totalResult.rows[0].count}`);
+      
+      const recentResult = await pool.query(`
+        SELECT COUNT(*) FROM help_requests 
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+      `);
+      console.log(`📊 Recent requests (24h): ${recentResult.rows[0].count}`);
+      
+      const cancelledResult = await pool.query(`
+        SELECT COUNT(*) FROM help_requests 
+        WHERE status = 'Cancelled'
+      `);
+      console.log(`📊 Cancelled requests: ${cancelledResult.rows[0].count}`);
+    }
+    
+    const mappedResults = result.rows.map(row => {
+      console.log('🔧 Processing row:', {
+        id: row.id,
+        title: row.title,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        lat_type: typeof row.latitude,
+        lng_type: typeof row.longitude,
+        status: row.status,
+        created_at: row.created_at
+      });
+      
+      return {
+        id: row.id.toString(),
+        title: row.title,
+        description: row.description,
+        // 🔥 IMPORTANT: Ensure coordinates are properly converted to numbers
+        latitude: parseFloat(row.latitude),
+        longitude: parseFloat(row.longitude),
+        contact: row.contact,
+        urgencyLevel: row.urgency_level,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        authorId: row.author_id,
+        authorName: row.author_name,
+        helpersCount: parseInt(row.helpers_count) || 0
+      };
+    });
+    
+    console.log(`✅ Returning ${mappedResults.length} mapped requests`);
+    return mappedResults;
   },
 
   // Offer help
@@ -179,7 +232,49 @@ const db = {
       [status, requestId, authorId]
     );
     return result.rows[0];
-  }
+  },
+
+  // 🔥 NEW: Debug function to check data integrity
+  async debugRequests() {
+    console.log('\n🔧 === DATABASE DEBUG ===');
+    
+    try {
+      // Check total requests
+      const totalResult = await pool.query('SELECT COUNT(*) FROM help_requests');
+      console.log(`📊 Total requests: ${totalResult.rows[0].count}`);
+      
+      // Check recent requests
+      const recentResult = await pool.query(`
+        SELECT id, title, latitude, longitude, status, created_at
+        FROM help_requests 
+        ORDER BY created_at DESC 
+        LIMIT 5
+      `);
+      
+      console.log('📋 Recent requests:');
+      recentResult.rows.forEach(row => {
+        console.log(`  - ID: ${row.id}, Title: ${row.title}`);
+        console.log(`    Coordinates: ${row.latitude}, ${row.longitude}`);
+        console.log(`    Status: ${row.status}, Created: ${row.created_at}`);
+      });
+      
+      // Check active requests query
+      const activeResult = await pool.query(`
+        SELECT COUNT(*) FROM help_requests 
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+          AND status != 'Cancelled'
+      `);
+      console.log(`📊 Active requests (should match API): ${activeResult.rows[0].count}`);
+      
+    } catch (error) {
+      console.error('❌ Debug query failed:', error);
+    }
+    
+    console.log('🔧 === END DEBUG ===\n');
+  },
+
+  // Expose pool for direct queries
+  pool
 };
 
 module.exports = { pool, initDatabase, db };

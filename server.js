@@ -588,6 +588,224 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     res.status(500).json({ error: 'Failed to offer help' });
   }
 });
+// Add this endpoint to your server.js file
+// 🔥 NEW: Helper marks their help as complete
+app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const helperId = req.user.id;
+    const helperName = req.user.name;
+
+    console.log('✅ Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
+
+    if (databaseConnected) {
+      try {
+        const client = await db.pool.connect();
+        
+        try {
+          await client.query('BEGIN');
+          
+          // Check if helper is actually helping with this request
+          const helperCheck = await client.query(
+            'SELECT * FROM help_offers WHERE request_id = $1 AND helper_id = $2',
+            [requestId, helperId]
+          );
+          
+          if (helperCheck.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'You are not helping with this request' });
+          }
+          
+          // Mark the help offer as completed
+          await client.query(
+            `UPDATE help_offers 
+             SET completed_at = NOW()
+             WHERE request_id = $1 AND helper_id = $2`,
+            [requestId, helperId]
+          );
+          
+          // Check if this was the last active helper
+          const activeHelpersResult = await client.query(
+            `SELECT COUNT(*) as count FROM help_offers 
+             WHERE request_id = $1 AND completed_at IS NULL`,
+            [requestId]
+          );
+          
+          const activeHelpersCount = parseInt(activeHelpersResult.rows[0].count);
+          
+          // Get request details
+          const requestResult = await client.query(
+            'SELECT * FROM help_requests WHERE id = $1',
+            [requestId]
+          );
+          
+          if (requestResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Request not found' });
+          }
+          
+          const request = requestResult.rows[0];
+          
+          // If no more active helpers, mark request as completed
+          // (You can change this logic based on your workflow preference)
+          if (activeHelpersCount === 0) {
+            await client.query(
+              `UPDATE help_requests 
+               SET status = 'Completed', updated_at = NOW()
+               WHERE id = $1`,
+              [requestId]
+            );
+          }
+          
+          await client.query('COMMIT');
+          
+          console.log(`✅ Helper ${helperId} marked help as complete for request ${requestId}`);
+          
+          res.json({
+            success: true,
+            message: 'Help marked as complete',
+            request_status: activeHelpersCount === 0 ? 'Completed' : 'In Progress',
+            active_helpers: activeHelpersCount
+          });
+          
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        
+      } catch (dbError) {
+        console.log('❌ Database complete help failed:', dbError.message);
+        return res.status(500).json({ error: 'Database error' });
+      }
+    } else {
+      // Fallback logic for in-memory storage
+      const requestIndex = fallbackRequests.findIndex(r => r.id === requestId);
+      if (requestIndex === -1) {
+        return res.status(404).json({ error: 'Request not found' });
+      }
+      
+      const request = fallbackRequests[requestIndex];
+      
+      if (!request.helpers || !request.helpers.includes(helperId)) {
+        return res.status(400).json({ error: 'You are not helping with this request' });
+      }
+      
+      // Mark helper as completed
+      if (!request.completedHelpers) request.completedHelpers = [];
+      request.completedHelpers.push(helperId);
+      
+      // Remove from active helpers
+      request.helpers = request.helpers.filter(h => h !== helperId);
+      request.helpersCount = request.helpers.length;
+      
+      // If no more active helpers, mark as completed
+      if (request.helpers.length === 0) {
+        request.status = 'Completed';
+      }
+      
+      request.updatedAt = new Date();
+      
+      res.json({
+        success: true,
+        message: 'Help marked as complete',
+        request_status: request.status,
+        active_helpers: request.helpers.length
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Complete help error:', error);
+    res.status(500).json({ error: 'Failed to complete help' });
+  }
+});
+
+// 🔥 OPTIONAL: Also add this endpoint for requester confirmation workflow
+app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const requesterId = req.user.id;
+    const { confirmed, stillNeedHelp } = req.body;
+
+    console.log('🎯 Requester confirming completion - Request ID:', requestId, 'Confirmed:', confirmed);
+
+    if (databaseConnected) {
+      try {
+        // Check if user is the requester
+        const requestResult = await db.pool.query(
+          'SELECT * FROM help_requests WHERE id = $1 AND author_id = $2',
+          [requestId, requesterId]
+        );
+        
+        if (requestResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Request not found or unauthorized' });
+        }
+        
+        if (confirmed && !stillNeedHelp) {
+          // Mark request as completed
+          await db.pool.query(
+            `UPDATE help_requests 
+             SET status = 'Completed', updated_at = NOW()
+             WHERE id = $1`,
+            [requestId]
+          );
+          
+          res.json({
+            success: true,
+            message: 'Request marked as completed',
+            status: 'Completed'
+          });
+          
+        } else if (stillNeedHelp) {
+          // Reset to "In Progress"
+          await db.pool.query(
+            `UPDATE help_requests 
+             SET status = 'In Progress', updated_at = NOW()
+             WHERE id = $1`,
+            [requestId]
+          );
+          
+          res.json({
+            success: true,
+            message: 'Request reset to in-progress',
+            status: 'In Progress'
+          });
+        } else {
+          return res.status(400).json({ error: 'Invalid completion parameters' });
+        }
+        
+      } catch (dbError) {
+        console.log('❌ Database confirm completion failed:', dbError.message);
+        return res.status(500).json({ error: 'Database error' });
+      }
+    } else {
+      // Fallback logic for in-memory storage
+      const requestIndex = fallbackRequests.findIndex(r => r.id === requestId && r.authorId === requesterId);
+      if (requestIndex === -1) {
+        return res.status(404).json({ error: 'Request not found or unauthorized' });
+      }
+      
+      if (confirmed && !stillNeedHelp) {
+        fallbackRequests[requestIndex].status = 'Completed';
+      } else if (stillNeedHelp) {
+        fallbackRequests[requestIndex].status = 'In Progress';
+      }
+      
+      fallbackRequests[requestIndex].updatedAt = new Date();
+      
+      res.json({
+        success: true,
+        message: 'Request status updated',
+        status: fallbackRequests[requestIndex].status
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Confirm completion error:', error);
+    res.status(500).json({ error: 'Failed to confirm completion' });
+  }
+});
 
 // 🔥 NEW: PUT /api/requests/:id/status - Update request status
 app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
@@ -696,6 +914,105 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('❌ User stats error:', error);
     res.status(500).json({ error: 'Failed to get user stats' });
+  }
+});
+
+app.get('/api/user/history', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log('📚 Fetching history for user:', req.user.email);
+
+    if (databaseConnected) {
+      try {
+        // Get requests user created
+        const createdRequestsResult = await pool.query(`
+          SELECT r.*, 
+                 COALESCE(h.helpers_count, 0) as helpers_count,
+                 COALESCE(h.completed_helpers, 0) as completed_helpers
+          FROM help_requests r
+          LEFT JOIN (
+            SELECT request_id, 
+                   COUNT(*) as helpers_count,
+                   COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_helpers
+            FROM help_offers
+            GROUP BY request_id
+          ) h ON r.id = h.request_id
+          WHERE r.author_id = $1
+          ORDER BY r.created_at DESC
+        `, [userId]);
+        
+        // Get requests user helped with
+        const helpedRequestsResult = await pool.query(`
+          SELECT r.*, ho.status as help_status, ho.created_at as help_offered_at, 
+                 ho.completed_at, COALESCE(h.helpers_count, 0) as helpers_count
+          FROM help_requests r
+          JOIN help_offers ho ON r.id = ho.request_id
+          LEFT JOIN (
+            SELECT request_id, COUNT(*) as helpers_count
+            FROM help_offers
+            GROUP BY request_id
+          ) h ON r.id = h.request_id
+          WHERE ho.helper_id = $1
+          ORDER BY ho.created_at DESC
+        `, [userId]);
+        
+        res.json({
+          success: true,
+          created_requests: createdRequestsResult.rows.map(row => ({
+            id: row.id.toString(),
+            title: row.title,
+            description: row.description,
+            status: row.status,
+            urgencyLevel: row.urgency_level,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            helpersCount: parseInt(row.helpers_count) || 0,
+            completedHelpers: parseInt(row.completed_helpers) || 0,
+            latitude: parseFloat(row.latitude),
+            longitude: parseFloat(row.longitude)
+          })),
+          helped_requests: helpedRequestsResult.rows.map(row => ({
+            id: row.id.toString(),
+            title: row.title,
+            description: row.description,
+            requestStatus: row.status,
+            helpStatus: row.help_status,
+            urgencyLevel: row.urgency_level,
+            helpOfferedAt: row.help_offered_at,
+            helpCompletedAt: row.completed_at,
+            authorName: row.author_name,
+            helpersCount: parseInt(row.helpers_count) || 0,
+            latitude: parseFloat(row.latitude),
+            longitude: parseFloat(row.longitude)
+          }))
+        });
+        
+      } catch (dbError) {
+        console.log('❌ Database history fetch failed:', dbError.message);
+        return res.status(500).json({ error: 'Database error' });
+      }
+    } else {
+      // Fallback logic
+      const createdRequests = fallbackRequests.filter(r => r.authorId === userId);
+      const helpedRequests = fallbackRequests.filter(r => 
+        r.helpers && r.helpers.includes(userId) ||
+        r.completedHelpers && r.completedHelpers.includes(userId)
+      );
+      
+      res.json({
+        success: true,
+        created_requests: createdRequests,
+        helped_requests: helpedRequests.map(r => ({
+          ...r,
+          helpStatus: r.completedHelpers && r.completedHelpers.includes(userId) ? 'completed' : 'active'
+        }))
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ History fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
 

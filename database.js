@@ -118,18 +118,23 @@ const db = {
     console.log('🔍 Querying for active requests...');
     
     const result = await pool.query(`
-      SELECT r.*, 
-            COALESCE(h.helpers_count, 0) as helpers_count
-      FROM help_requests r
-      LEFT JOIN (
-        SELECT request_id, COUNT(*) as helpers_count
-        FROM help_offers
-        GROUP BY request_id
-      ) h ON r.id = h.request_id
-      WHERE r.created_at > NOW() - INTERVAL '24 hours'
-        AND r.status NOT IN ('Completed', 'Cancelled')
-      ORDER BY r.created_at DESC
-    `);
+    SELECT r.*, 
+      COALESCE(h.helpers_count, 0) as helpers_count,
+      COALESCE(h.active_helpers, 0) as active_helpers,
+      COALESCE(h.completed_helpers, 0) as completed_helpers
+    FROM help_requests r
+    LEFT JOIN (
+      SELECT request_id, 
+        COUNT(*) as helpers_count,
+        COUNT(CASE WHEN status != 'completed' THEN 1 END) as active_helpers,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_helpers
+      FROM help_offers
+      GROUP BY request_id
+    ) h ON r.id = h.request_id
+    WHERE r.created_at > NOW() - INTERVAL '24 hours'
+      AND r.status NOT IN ('completed', 'cancelled')
+    ORDER BY r.created_at DESC
+  `);
     
     console.log(`🔍 Raw query result: ${result.rows.length} rows`);
     

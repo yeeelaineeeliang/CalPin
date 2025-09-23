@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  CalPin
 //
-//  Clean production main view without debug elements
+//  Complete enhanced main view with dynamic profile integration and auto-refresh
 //
 
 import SwiftUI
@@ -12,12 +12,13 @@ import MapKit
 
 struct ContentView: View {
     @State private var isSignedIn = false
-    @State private var token = ""
     @State private var showingRequestView = false
     @State private var selectedPlace: Place?
     @State private var showingProfile = false
-    @State private var userName = ""
-    @State private var userEmail = ""
+    @State private var refreshID = UUID() // For triggering manual refreshes
+    
+    // UserSession to manage authentication across the app
+    @StateObject private var userSession = UserSession()
     
     // Single observer for data consistency
     @StateObject private var sharedObserver = observer(token: "")
@@ -66,7 +67,8 @@ struct ContentView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .onChange(of: token) { newToken in
+        .environmentObject(userSession) // Provide UserSession to all child views
+        .onChange(of: userSession.token) { newToken in
             print("🔄 Token changed in ContentView")
             sharedObserver.token = newToken
             if !newToken.isEmpty {
@@ -76,15 +78,21 @@ struct ContentView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("RefreshRequests"))) { _ in
+            handleDataRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ProfileUpdated"))) { _ in
+            handleProfileUpdate()
+        }
     }
     
     private var mainAppView: some View {
         ZStack {
             // Map view using shared observer
-            MapView(token: $token, selectedPlace: $selectedPlace, observer: sharedObserver)
+            MapView(token: $userSession.token, selectedPlace: $selectedPlace, observer: sharedObserver)
                 .ignoresSafeArea(.all)
             
-            // Profile button at top-left - cleaned up, no debug button
+            // Profile button at top-left only
             VStack {
                 HStack {
                     Button(action: { showingProfile.toggle() }) {
@@ -93,7 +101,7 @@ struct ContentView: View {
                                 .font(.title2)
                                 .foregroundColor(berkeleyBlue)
                             
-                            Text(userName.components(separatedBy: " ").first ?? "User")
+                            Text(userSession.userName.components(separatedBy: " ").first ?? "User")
                                 .font(.caption2)
                                 .foregroundColor(berkeleyBlue)
                         }
@@ -107,6 +115,7 @@ struct ContentView: View {
                     
                     Spacer()
                 }
+                
                 Spacer()
             }
             
@@ -117,18 +126,26 @@ struct ContentView: View {
                     Spacer()
                     
                     VStack(spacing: 12) {
-                        // Data refresh indicator
-                        if sharedObserver.isLoading {
-                            Button(action: {}) {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .blue))
-                                    .scaleEffect(0.8)
-                                    .padding(8)
-                                    .background(Color.white)
-                                    .clipShape(Circle())
-                                    .shadow(radius: 4)
+                        // Manual refresh button with loading state
+                        if !sharedObserver.datas.isEmpty {
+                            Button(action: {
+                                handleManualRefresh()
+                            }) {
+                                if sharedObserver.isLoading {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: berkeleyBlue))
+                                        .scaleEffect(0.7)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundColor(berkeleyBlue)
+                                }
                             }
-                            .disabled(true)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white)
+                            .clipShape(Circle())
+                            .shadow(radius: 4)
+                            .disabled(sharedObserver.isLoading)
                         }
                         
                         // Main add button
@@ -144,8 +161,8 @@ struct ContentView: View {
                                 .shadow(radius: 8)
                         }
                         .scaleEffect(1.1)
-                        .disabled(token.isEmpty)
-                        .opacity(token.isEmpty ? 0.6 : 1.0)
+                        .disabled(userSession.token.isEmpty)
+                        .opacity(userSession.token.isEmpty ? 0.6 : 1.0)
                     }
                 }
             }
@@ -159,23 +176,26 @@ struct ContentView: View {
                     selectedPlace: $selectedPlace,
                     places: sharedObserver.datas,
                     offset: $cardOffset,
-                    isDragging: $isDragging
+                    isDragging: $isDragging,
+                    userToken: userSession.token // Pass the token here
                 )
             }
         }
         .sheet(isPresented: $showingRequestView) {
-            RequestView(token: $token) {
+            RequestView(token: $userSession.token) {
                 handleRequestCreated()
             }
         }
         .sheet(isPresented: $showingProfile) {
             ProfileView(
-                userName: userName,
-                userEmail: userEmail,
+                userName: userSession.userName,
+                userEmail: userSession.userEmail,
                 onSignOut: handleSignOut
             )
+            .environmentObject(userSession) // Pass the user session to ProfileView
         }
         .navigationBarHidden(true)
+        .id(refreshID) // This will force UI updates when refreshID changes
     }
     
     private var signInView: some View {
@@ -288,6 +308,84 @@ struct ContentView: View {
         )
     }
     
+    // MARK: - Enhanced Data Management
+    
+    // Enhanced data refresh handler
+    private func handleDataRefresh() {
+        print("🔄 Data refresh triggered by user action")
+        
+        // Immediate refresh
+        DispatchQueue.main.async {
+            self.sharedObserver.fetchData {
+                print("✅ Data refreshed after user action")
+            }
+            
+            // Update the refresh ID to trigger UI updates
+            self.refreshID = UUID()
+        }
+        
+        // Delayed refresh to catch database propagation delays
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.sharedObserver.fetchData {
+                print("✅ Delayed refresh completed")
+            }
+        }
+    }
+    
+    // Profile update handler
+    private func handleProfileUpdate() {
+        print("📊 Profile update triggered")
+        
+        // If profile view is visible, it will automatically refresh its data
+        // due to the @Published properties in UserSession
+        
+        // Optional: Post notification to profile view if needed
+        NotificationCenter.default.post(name: NSNotification.Name("RefreshProfile"), object: nil)
+    }
+    
+    // Manual refresh handler
+    private func handleManualRefresh() {
+        print("🔄 Manual refresh triggered")
+        
+        // Add haptic feedback
+        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+        impactFeedback.impactOccurred()
+        
+        sharedObserver.fetchData {
+            print("✅ Manual refresh completed")
+        }
+        
+        // Update refresh ID for UI updates
+        refreshID = UUID()
+    }
+    
+    // Enhanced request creation handler with profile update
+    private func handleRequestCreated() {
+        print("📝 Request created callback triggered")
+        
+        // Immediate data refresh
+        DispatchQueue.main.async {
+            self.sharedObserver.fetchData {
+                print("✅ Data refreshed after request creation")
+            }
+            
+            // Trigger profile refresh since user just created a request
+            self.handleProfileUpdate()
+            
+            // Update refresh ID
+            self.refreshID = UUID()
+        }
+        
+        // Additional delayed refresh
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.sharedObserver.fetchData {
+                print("✅ Final refresh completed")
+            }
+        }
+    }
+    
+    // MARK: - Authentication
+    
     // Enhanced sign-in handler
     func handleSignInButton() {
         print("🔐 Sign-in button tapped")
@@ -309,9 +407,9 @@ struct ContentView: View {
                 }
                 
                 let user = result.user
-                userName = user.profile?.name ?? "Berkeley Student"
-                userEmail = user.profile?.email ?? ""
-                token = user.idToken?.tokenString ?? ""
+                let userName = user.profile?.name ?? "Berkeley Student"
+                let userEmail = user.profile?.email ?? ""
+                let token = user.idToken?.tokenString ?? ""
                 
                 print("✅ Sign-in successful!")
                 print("👤 User name: \(userName)")
@@ -329,6 +427,12 @@ struct ContentView: View {
                 // Verify Berkeley email
                 if userEmail.hasSuffix("@berkeley.edu") || userEmail.hasSuffix("@student.berkeley.edu") {
                     print("✅ Berkeley email verified")
+                    
+                    // Update UserSession
+                    userSession.token = token
+                    userSession.userName = userName
+                    userSession.userEmail = userEmail
+                    
                     withAnimation(.easeInOut(duration: 0.5)) {
                         isSignedIn = true
                     }
@@ -339,43 +443,26 @@ struct ContentView: View {
         }
     }
     
-    // Enhanced request creation handler
-    private func handleRequestCreated() {
-        print("🔄 Request created callback triggered")
-        
-        // Immediate refresh
-        DispatchQueue.main.async {
-            print("📱 Triggering immediate data refresh...")
-            self.sharedObserver.fetchData {
-                print("✅ Data refreshed after request creation")
-                print("📊 New data count: \(self.sharedObserver.datas.count)")
-            }
-        }
-        
-        // Also schedule a delayed refresh to catch any database delays
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            print("🔄 Triggering delayed refresh...")
-            self.sharedObserver.fetchData {
-                print("✅ Delayed refresh completed")
-                print("📊 Final data count: \(self.sharedObserver.datas.count)")
-            }
-        }
-    }
-    
     func handleSignOut() {
         print("👋 Sign out initiated")
         GIDSignIn.sharedInstance.signOut()
+        
+        // Clear UserSession
+        userSession.token = ""
+        userSession.userName = ""
+        userSession.userEmail = ""
+        
         withAnimation(.easeInOut(duration: 0.5)) {
             isSignedIn = false
-            token = ""
-            userName = ""
-            userEmail = ""
             selectedPlace = nil
             sharedObserver.datas = [] // Clear observer data
+            refreshID = UUID() // Reset refresh ID
         }
         print("✅ User signed out successfully")
     }
 }
+
+// MARK: - Supporting Views
 
 // Feature card component
 struct FeatureCard: View {
@@ -407,263 +494,18 @@ struct FeatureCard: View {
     }
 }
 
-// Enhanced Profile view with better stats
-struct ProfileView: View {
-    let userName: String
-    let userEmail: String
-    let onSignOut: () -> Void
-    @Environment(\.presentationMode) var presentationMode
+// User session to manage authentication state
+class UserSession: ObservableObject {
+    @Published var token: String = ""
+    @Published var userEmail: String = ""
+    @Published var userName: String = ""
     
-    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
-    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
-    
-    var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Profile header
-                    VStack(spacing: 16) {
-                        // Avatar
-                        Circle()
-                            .fill(berkeleyBlue.opacity(0.1))
-                            .frame(width: 100, height: 100)
-                            .overlay(
-                                Text(String(userName.prefix(1)).uppercased())
-                                    .font(.largeTitle)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(berkeleyBlue)
-                            )
-                        
-                        VStack(spacing: 4) {
-                            Text(userName)
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(berkeleyBlue)
-                            
-                            Text(userEmail)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            // Berkeley verification badge
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.shield.fill")
-                                    .foregroundColor(.green)
-                                Text("Berkeley Verified")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(12)
-                        }
-                    }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.1), radius: 8)
-                    
-                    // Stats section
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Image(systemName: "chart.bar.fill")
-                                .foregroundColor(californiaGold)
-                            Text("Your Impact")
-                                .font(.headline)
-                                .fontWeight(.bold)
-                                .foregroundColor(berkeleyBlue)
-                        }
-                        
-                        HStack(spacing: 16) {
-                            StatCard(
-                                title: "Requests Made",
-                                value: "3",
-                                icon: "hand.raised.fill",
-                                color: .blue
-                            )
-                            
-                            StatCard(
-                                title: "People Helped",
-                                value: "7",
-                                icon: "heart.fill",
-                                color: .red
-                            )
-                        }
-                        
-                        HStack(spacing: 16) {
-                            StatCard(
-                                title: "Community Points",
-                                value: "42",
-                                icon: "star.fill",
-                                color: californiaGold
-                            )
-                            
-                            StatCard(
-                                title: "This Week",
-                                value: "2",
-                                icon: "calendar",
-                                color: .green
-                            )
-                        }
-                    }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.1), radius: 8)
-                    
-                    // Settings section
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Image(systemName: "gearshape.fill")
-                                .foregroundColor(berkeleyBlue)
-                            Text("Settings")
-                                .font(.headline)
-                                .fontWeight(.bold)
-                                .foregroundColor(berkeleyBlue)
-                        }
-                        
-                        VStack(spacing: 0) {
-                            SettingsRow(
-                                icon: "bell.fill",
-                                title: "Notifications",
-                                subtitle: "Manage your alert preferences"
-                            )
-                            
-                            Divider()
-                                .padding(.leading, 40)
-                            
-                            SettingsRow(
-                                icon: "location.fill",
-                                title: "Privacy",
-                                subtitle: "Control your location sharing"
-                            )
-                            
-                            Divider()
-                                .padding(.leading, 40)
-                            
-                            SettingsRow(
-                                icon: "questionmark.circle.fill",
-                                title: "Help & Support",
-                                subtitle: "Get help or report issues"
-                            )
-                        }
-                        .background(Color.white)
-                        .cornerRadius(12)
-                    }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(20)
-                    .shadow(color: .black.opacity(0.1), radius: 8)
-                    
-                    Spacer(minLength: 20)
-                    
-                    // Sign out button
-                    Button(action: onSignOut) {
-                        HStack {
-                            Image(systemName: "arrow.right.square")
-                            Text("Sign Out")
-                        }
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red)
-                        .cornerRadius(12)
-                        .shadow(color: .red.opacity(0.3), radius: 8, y: 4)
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 40)
-                }
-                .padding()
-            }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(true)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                    .foregroundColor(berkeleyBlue)
-                    .fontWeight(.semibold)
-                }
-            }
-        }
+    var isAuthenticated: Bool {
+        return !token.isEmpty
     }
 }
 
-// Enhanced stat card component
-struct StatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(.title)
-                .fontWeight(.bold)
-                .foregroundColor(.primary)
-            
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-    }
-}
-
-// Settings row component
-struct SettingsRow: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundColor(.blue)
-                .frame(width: 24, height: 24)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding()
-        .background(Color.white)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Handle settings tap
-            print("Settings tapped: \(title)")
-        }
-    }
-}
-
-// Preview
+// MARK: - Preview
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()

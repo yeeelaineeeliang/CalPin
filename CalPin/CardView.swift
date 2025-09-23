@@ -1,230 +1,551 @@
 //
-//  CardView.swift
+//  Enhanced CardView.swift
 //  CalPin
 //
-//  Enhanced card view with urgency indicators and help functionality
+//  Dynamic card view with proper helper functionality
 //
 
-import Foundation
 import SwiftUI
-import MapKit
+import Alamofire
 
 struct CardView: View {
     let place: Place
-    @State private var isHelpOffered = false
-    @State private var showingHelpConfirmation = false
+    let userToken: String
+    @State private var isOfferingHelp = false
+    @State private var showingContactInfo = false
+    @State private var showingSuccess = false
+    @State private var successMessage = ""
     
-    private var urgencyColor: Color {
-        switch place.urgencyLevel {
-        case .low: return .green
-        case .medium: return .orange
-        case .high: return .red
-        case .urgent: return .purple
-        }
-    }
+    // Color scheme
+    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
+    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             // Header with title and urgency
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(place.title)
-                        .font(.headline)
-                        .fontWeight(.bold)
-                        .multilineTextAlignment(.leading)
-                    
-                    Text("by \(place.authorName)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 4) {
-                    // Urgency badge
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(urgencyColor)
-                            .frame(width: 8, height: 8)
-                        Text(place.urgencyLevel.rawValue)
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(urgencyColor)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(urgencyColor.opacity(0.1))
-                    .cornerRadius(12)
-                    
-                    // Time stamp
-                    Text(place.timeAgo)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
+            headerView
             
             // Description
-            Text(place.description)
-                .font(.subheadline)
-                .foregroundColor(.primary)
-                .lineLimit(3)
+            descriptionView
             
-            // Location and distance info
-            HStack {
-                Image(systemName: "location.fill")
-                    .foregroundColor(.blue)
-                    .font(.caption)
-                
-                Text("\(place.distance) away • \(place.duration)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                if place.helpersCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "person.2.fill")
-                            .font(.caption2)
-                            .foregroundColor(.blue)
-                        Text("\(place.helpersCount)")
-                            .font(.caption2)
-                            .foregroundColor(.blue)
-                    }
-                }
-            }
+            // Location and timing info
+            locationInfoView
+            
+            // Status and helper info
+            statusInfoView
             
             // Action buttons
-            HStack(spacing: 12) {
-                // Help button
-                Button(action: {
-                    showingHelpConfirmation = true
-                }) {
-                    HStack {
-                        Image(systemName: isHelpOffered ? "checkmark.circle.fill" : "hand.raised.fill")
-                        Text(isHelpOffered ? "Help Offered" : "Offer Help")
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(isHelpOffered ? Color.gray : Color.green)
-                    .cornerRadius(8)
-                }
-                .disabled(isHelpOffered || place.status != .open)
-                
-                // Contact button
-                Button(action: {
-                    // Open contact options
-                    contactHelper()
-                }) {
-                    HStack {
-                        Image(systemName: "message.fill")
-                        Text("Contact")
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.blue)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(8)
-                }
-            }
-            
-            // Status indicator
-            if place.status != .open {
-                HStack {
-                    Image(systemName: statusIcon(for: place.status))
-                        .foregroundColor(statusColor(for: place.status))
-                    Text(place.status.rawValue)
-                        .font(.caption)
-                        .foregroundColor(statusColor(for: place.status))
-                        .fontWeight(.medium)
-                }
-                .padding(.top, 4)
-            }
+            actionButtonsView
         }
         .padding()
         .background(Color(.systemBackground))
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-        .overlay(
-            // Left border indicating urgency
-            Rectangle()
-                .fill(urgencyColor)
-                .frame(width: 4)
-                .cornerRadius(2),
-            alignment: .leading
-        )
-        .alert("Offer Help", isPresented: $showingHelpConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Confirm") {
-                offerHelp()
-            }
+        .shadow(color: .black.opacity(0.1), radius: 8)
+        .alert("Success!", isPresented: $showingSuccess) {
+            Button("OK") { }
         } message: {
-            Text("Are you sure you want to offer help for '\(place.title)'?")
+            Text(successMessage)
+        }
+        .sheet(isPresented: $showingContactInfo) {
+            ContactInfoView(place: place)
         }
     }
     
-    private func statusIcon(for status: RequestStatus) -> String {
-        switch status {
+    // MARK: - Header View
+    private var headerView: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(place.title)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                
+                Text("by \(place.authorName)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 8) {
+                // Urgency badge
+                UrgencyBadge(level: place.urgencyLevel)
+                
+                // Status badge
+                StatusBadge(status: place.status)
+            }
+        }
+    }
+    
+    // MARK: - Description View
+    private var descriptionView: some View {
+        Text(place.description)
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            .lineLimit(3)
+            .padding(.vertical, 4)
+    }
+    
+    // MARK: - Location Info View
+    private var locationInfoView: some View {
+        HStack {
+            // Distance and time
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "location")
+                        .foregroundColor(berkeleyBlue)
+                        .font(.caption)
+                    Text(place.distance)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .foregroundColor(berkeleyBlue)
+                        .font(.caption)
+                    Text(place.duration)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+            }
+            
+            Spacer()
+            
+            // Time ago
+            Text(place.timeAgo)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    // MARK: - Status Info View
+    private var statusInfoView: some View {
+        HStack {
+            // Helpers count
+            HStack(spacing: 4) {
+                Image(systemName: "person.2.fill")
+                    .foregroundColor(place.helpersCount > 0 ? .green : .gray)
+                    .font(.caption)
+                
+                Text("\(place.helpersCount) helper\(place.helpersCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(place.helpersCount > 0 ? .green : .gray)
+            }
+            
+            // Current user helping status
+            if place.isCurrentUserHelping {
+                HStack(spacing: 4) {
+                    Image(systemName: "hand.raised.fill")
+                        .foregroundColor(californiaGold)
+                        .font(.caption)
+                    
+                    Text("You're helping!")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(californiaGold)
+                }
+            }
+            
+            Spacer()
+            
+            // Completion indicator
+            if place.canBeCompleted && place.isCurrentUserHelping {
+                Text("Ready to complete")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+            }
+        }
+    }
+    
+    // MARK: - Action Buttons View
+    private var actionButtonsView: some View {
+        HStack(spacing: 12) {
+            // Contact info button
+            Button(action: {
+                showingContactInfo = true
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "envelope")
+                        .font(.caption)
+                    Text("Contact")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(berkeleyBlue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(berkeleyBlue.opacity(0.1))
+                .cornerRadius(8)
+            }
+            
+            Spacer()
+            
+            // Main action button (dynamic based on state)
+            if place.isCurrentUserHelping {
+                if place.canBeCompleted {
+                    // Complete help button
+                    Button(action: completeHelp) {
+                        HStack(spacing: 6) {
+                            if isOfferingHelp {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption)
+                                Text("Complete")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.green)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isOfferingHelp)
+                } else {
+                    // Already helping indicator
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                        Text("Helping")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(californiaGold)
+                    .cornerRadius(12)
+                }
+            } else {
+                // Offer help button
+                if place.status == .open {
+                    Button(action: offerHelp) {
+                        HStack(spacing: 6) {
+                            if isOfferingHelp {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "hand.raised.fill")
+                                    .font(.caption)
+                                Text("Offer Help")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(californiaGold)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isOfferingHelp)
+                } else {
+                    // Status indicator for non-open requests
+                    HStack(spacing: 6) {
+                        Image(systemName: statusIcon)
+                            .font(.caption)
+                        Text(place.status.displayName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(place.status.color)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(place.status.color.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Helper Properties
+    
+    private var statusIcon: String {
+        switch place.status {
         case .open: return "circle"
-        case .inProgress: return "clock.fill"
-        case .completed: return "checkmark.circle.fill"
-        case .cancelled: return "xmark.circle.fill"
+        case .inProgress: return "clock"
+        case .completed: return "checkmark.circle"
+        case .cancelled: return "xmark.circle"
         }
     }
     
-    private func statusColor(for status: RequestStatus) -> Color {
-        switch status {
-        case .open: return .blue
-        case .inProgress: return .orange
-        case .completed: return .green
-        case .cancelled: return .red
-        }
-    }
+    // MARK: - Actions
     
     private func offerHelp() {
-        // TODO: Implement API call to offer help
-        withAnimation {
-            isHelpOffered = true
+        guard !userToken.isEmpty else {
+            print("❌ No token available for offering help")
+            return
         }
         
-        // Here you would typically make an API call
-        // HelpService.shared.offerHelp(for: place.id) { success in
-        //     if success {
-        //         // Handle success
-        //     }
-        // }
+        isOfferingHelp = true
+        
+        let headers: HTTPHeaders = [
+            "Authorization": "Bearer \(userToken)",
+            "Content-Type": "application/json"
+        ]
+        
+        AF.request(
+            NetworkConfig.offerHelpURL(for: place.id),
+            method: .post,
+            headers: headers
+        )
+        .responseJSON { [self] response in
+            DispatchQueue.main.async {
+                self.isOfferingHelp = false
+                
+                switch response.result {
+                case .success:
+                    print("✅ Successfully offered help for request: \(place.id)")
+                    successMessage = "Help offered successfully! The requester will be notified."
+                    showingSuccess = true
+                    
+                    // Trigger a refresh of the data
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshRequests"), object: nil)
+                    
+                case .failure(let error):
+                    print("❌ Failed to offer help: \(error)")
+                    if let data = response.data,
+                       let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ Server response: \(errorString)")
+                    }
+                    
+                    // Show error message
+                    successMessage = "Failed to offer help. Please try again."
+                    showingSuccess = true
+                }
+            }
+        }
     }
     
-    private func contactHelper() {
-        // Open contact options (email, phone, etc.)
-        if let url = URL(string: "mailto:\(place.contact)") {
-            UIApplication.shared.open(url)
+    private func completeHelp() {
+        guard !userToken.isEmpty else {
+            print("❌ No token available for completing help")
+            return
+        }
+        
+        isOfferingHelp = true
+        
+        let headers: HTTPHeaders = [
+            "Authorization": "Bearer \(userToken)",
+            "Content-Type": "application/json"
+        ]
+        
+        AF.request(
+            NetworkConfig.completeHelpURL(for: place.id),
+            method: .post,
+            headers: headers
+        )
+        .responseJSON { [self] response in
+            DispatchQueue.main.async {
+                self.isOfferingHelp = false
+                
+                switch response.result {
+                case .success:
+                    print("✅ Successfully completed help for request: \(place.id)")
+                    successMessage = "Help marked as complete! Thank you for helping a fellow student."
+                    showingSuccess = true
+                    
+                    // Trigger a refresh of the data
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshRequests"), object: nil)
+                    
+                case .failure(let error):
+                    print("❌ Failed to complete help: \(error)")
+                    if let data = response.data,
+                       let errorString = String(data: data, encoding: .utf8) {
+                        print("❌ Server response: \(errorString)")
+                    }
+                    
+                    successMessage = "Failed to complete help. Please try again."
+                    showingSuccess = true
+                }
+            }
         }
     }
 }
 
-// Preview
-struct CardView_Previews: PreviewProvider {
-    static var previews: some View {
-        let samplePlace = Place(
-            title: "Need Help with Calculus Homework",
-            coordinate: CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585),
-            description: "I'm struggling with integration by parts and could really use someone to explain the concept. Happy to meet at the library or a coffee shop nearby.",
-            contact: "student@berkeley.edu",
-            distance: "0.3mi",
-            duration: "4min",
-            urgencyLevel: .high,
-            status: .open,
-            authorName: "Alex Chen",
-            helpersCount: 2
-        )
-        
-        CardView(place: samplePlace)
-            .padding()
-            .previewLayout(.sizeThatFits)
+// MARK: - Contact Info View
+struct ContactInfoView: View {
+    let place: Place
+    @Environment(\.presentationMode) var presentationMode
+    
+    private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
+    private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
+    
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 12) {
+                        Image(systemName: "envelope.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(californiaGold)
+                        
+                        Text("Contact Information")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(berkeleyBlue)
+                        
+                        Text("Reach out to coordinate help")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    
+                    // Request details
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundColor(berkeleyBlue)
+                            Text("Request Details")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(berkeleyBlue)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(place.title)
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                            
+                            Text(place.description)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            
+                            HStack {
+                                UrgencyBadge(level: place.urgencyLevel)
+                                Spacer()
+                                Text("Posted \(place.timeAgo)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    
+                    // Contact information
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Image(systemName: "person.fill")
+                                .foregroundColor(berkeleyBlue)
+                            Text("Contact Info")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(berkeleyBlue)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 12) {
+                            // Requester name
+                            HStack {
+                                Image(systemName: "person.circle")
+                                    .foregroundColor(.secondary)
+                                Text("Requester:")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Text(place.authorName)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                            
+                            // Contact method
+                            HStack {
+                                Image(systemName: "envelope")
+                                    .foregroundColor(.secondary)
+                                Text("Contact:")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Text(place.contact)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(berkeleyBlue)
+                            }
+                            
+                            // Copy contact button
+                            Button(action: {
+                                UIPasteboard.general.string = place.contact
+                                // Could add a toast notification here
+                            }) {
+                                HStack {
+                                    Image(systemName: "doc.on.doc")
+                                    Text("Copy Contact Info")
+                                }
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(berkeleyBlue)
+                                .cornerRadius(12)
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    
+                    // Safety reminder
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: "shield.fill")
+                                .foregroundColor(.green)
+                            Text("Safety Reminder")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.green)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("• Meet in public places on campus")
+                            Text("• Trust your instincts")
+                            Text("• Let someone know where you're going")
+                            Text("• Use Berkeley email for verification")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .background(Color.green.opacity(0.05))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+                    
+                    Spacer(minLength: 40)
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Contact")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        presentationMode.wrappedValue.dismiss()
+                    }
+                    .foregroundColor(berkeleyBlue)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
+
+
+

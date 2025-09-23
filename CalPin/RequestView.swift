@@ -549,43 +549,61 @@ struct UrgencyOptionView: View {
     let isSelected: Bool
     let action: () -> Void
     
-    private var urgencyColor: Color {
-        switch urgency {
-        case .low: return .green
-        case .medium: return .orange
-        case .high: return .red
-        case .urgent: return .purple
-        }
-    }
-    
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
-                Circle()
-                    .fill(urgencyColor)
-                    .frame(width: 24, height: 24)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.white, lineWidth: isSelected ? 3 : 0)
-                    )
+            VStack(spacing: 12) {
+                // 🔥 Icon with urgency-based color
+                ZStack {
+                    Circle()
+                        .fill(urgency.color.opacity(isSelected ? 0.3 : 0.1))
+                        .frame(width: 50, height: 50)
+                        .overlay(
+                            Circle()
+                                .stroke(urgency.color.opacity(isSelected ? 0.6 : 0.3), lineWidth: 2)
+                        )
+                    
+                    // 🔥 SAME ICON for consistency
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(urgency.color)
+                }
                 
-                Text(urgency.rawValue)
-                    .font(.caption)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .foregroundColor(isSelected ? urgencyColor : .primary)
+                VStack(spacing: 4) {
+                    Text(urgency.rawValue)
+                        .font(.subheadline)
+                        .fontWeight(isSelected ? .semibold : .medium)
+                        .foregroundColor(.primary)
+                    
+                    // 🔥 NEW: Show time expectation to help users choose
+                    Text(urgency.timeExpectation)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
             }
             .frame(maxWidth: .infinity)
-            .padding()
+            .padding(.vertical, 16)
+            .padding(.horizontal, 8)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isSelected ? urgencyColor.opacity(0.1) : Color(.systemGray6))
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isSelected ? urgencyColor : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(
+                                isSelected ? urgency.color : Color.gray.opacity(0.2),
+                                lineWidth: isSelected ? 2 : 1
+                            )
                     )
+            )
+            .shadow(
+                color: isSelected ? urgency.color.opacity(0.2) : .clear,
+                radius: isSelected ? 8 : 0,
+                y: isSelected ? 4 : 0
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .scaleEffect(isSelected ? 1.05 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
     }
 }
 

@@ -2,7 +2,7 @@
 //  DraggableCardView.swift
 //  CalPin
 //
-//  Draggable and resizable bottom card for displaying help requests
+//  Updated draggable card that passes token to CardView
 //
 
 import SwiftUI
@@ -13,6 +13,7 @@ struct DraggableCardView: View {
     let places: [Place]
     @Binding var offset: CGFloat
     @Binding var isDragging: Bool
+    let userToken: String // Add token parameter
     
     // Card position states
     private let minOffset: CGFloat = 100   // Minimized card height
@@ -28,9 +29,9 @@ struct DraggableCardView: View {
                 // Card content
                 ScrollView {
                     if let selectedPlace = selectedPlace {
-                        // Detailed view for selected place
+                        // Detailed view for selected place using the enhanced CardView
                         VStack(spacing: 16) {
-                            DetailedPlaceCardView(place: selectedPlace) {
+                            DetailedPlaceCardView(place: selectedPlace, userToken: userToken) {
                                 withAnimation(.spring()) {
                                     self.selectedPlace = nil
                                 }
@@ -43,15 +44,16 @@ struct DraggableCardView: View {
                             // Header
                             headerView
                             
-                            // Request list
+                            // Request list using enhanced CardView with token
                             ForEach(sortedPlaces) { place in
-                                CompactCardView(place: place) {
-                                    withAnimation(.spring()) {
-                                        selectedPlace = place
-                                        offset = maxOffset // Expand when selecting
+                                CardView(place: place, userToken: userToken)
+                                    .onTapGesture {
+                                        withAnimation(.spring()) {
+                                            selectedPlace = place
+                                            offset = maxOffset // Expand when selecting
+                                        }
                                     }
-                                }
-                                .padding(.horizontal)
+                                    .padding(.horizontal)
                             }
                             
                             // Empty state
@@ -79,8 +81,6 @@ struct DraggableCardView: View {
                 DragGesture()
                     .onChanged { value in
                         isDragging = true
-                        // Use value.translation.y (not gesture.translation.y)
-                        // Negative translation means dragging up, which should increase offset
                         let newOffset = offset - value.translation.height
                         offset = max(minOffset, min(maxOffset, newOffset))
                     }
@@ -100,16 +100,8 @@ struct DraggableCardView: View {
                 .frame(width: 40, height: 6)
                 .padding(.top, 8)
             
-            // Test buttons for resizing (temporary)
+            // Resize buttons
             HStack(spacing: 20) {
-//                Button("Min") {
-//                    withAnimation(.spring()) {
-//                        offset = minOffset
-//                    }
-//                }
-//                .font(.caption)
-//                .foregroundColor(.blue)
-                
                 Button("Mid") {
                     withAnimation(.spring()) {
                         offset = midOffset
@@ -142,7 +134,7 @@ struct DraggableCardView: View {
                     Spacer()
                     
                     if offset > minOffset + 50 {
-                        Text(selectedPlace != nil ? "Request Details" : "Tap buttons to resize")
+                        Text(selectedPlace != nil ? "Request Details" : "Tap requests to view details")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -162,7 +154,7 @@ struct DraggableCardView: View {
                 
                 Spacer()
                 
-                // Sort indicator (simplified for space)
+                // Sort indicator
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
                         .font(.caption)
@@ -209,7 +201,7 @@ struct DraggableCardView: View {
                 .font(.headline)
                 .fontWeight(.semibold)
             
-            Text("When students post help requests, they'll appear here.")
+            Text("When students post help requests, they'll appear here. Be the first to create one!")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -231,80 +223,10 @@ struct DraggableCardView: View {
     }
 }
 
-// Compact card view for the list
-struct CompactCardView: View {
-    let place: Place
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Urgency indicator
-                Circle()
-                    .fill(urgencyColor)
-                    .frame(width: 12, height: 12)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(place.title)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                    
-                    HStack {
-                        Text(place.timeAgo)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        
-                        Text("•")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        
-                        Text("\(place.distance)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        
-                        Spacer()
-                        
-                        if place.helpersCount > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "person.2.fill")
-                                    .font(.caption2)
-                                Text("\(place.helpersCount)")
-                                    .font(.caption2)
-                            }
-                            .foregroundColor(.blue)
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    private var urgencyColor: Color {
-        switch place.urgencyLevel {
-        case .low: return .green
-        case .medium: return .orange
-        case .high: return .red
-        case .urgent: return .purple
-        }
-    }
-}
-
-
-// Detailed card view for selected place
+// Detailed card view for selected place - using enhanced CardView with token
 struct DetailedPlaceCardView: View {
     let place: Place
+    let userToken: String
     let onClose: () -> Void
     
     var body: some View {
@@ -312,13 +234,13 @@ struct DetailedPlaceCardView: View {
             // Header with close button
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
+                    Text("Selected Request")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
                     Text(place.title)
                         .font(.title2)
                         .fontWeight(.bold)
-                    
-                    Text("by \(place.authorName) • \(place.timeAgo)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
                 }
                 
                 Spacer()
@@ -330,48 +252,8 @@ struct DetailedPlaceCardView: View {
                 }
             }
             
-            // Urgency and status
-            HStack {
-                UrgencyBadge(level: place.urgencyLevel)
-                StatusBadge(status: place.status)
-                Spacer()
-            }
-            
-            // Description
-            Text(place.description)
-                .font(.body)
-                .lineSpacing(2)
-            
-            // Action buttons
-            HStack(spacing: 12) {
-                Button(action: {}) {
-                    HStack {
-                        Image(systemName: "hand.raised.fill")
-                        Text("Offer Help")
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.green)
-                    .cornerRadius(12)
-                }
-                
-                Button(action: {}) {
-                    HStack {
-                        Image(systemName: "message.fill")
-                        Text("Contact")
-                    }
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.blue)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(12)
-                }
-            }
+            // Use the enhanced CardView for detailed view with token
+            CardView(place: place, userToken: userToken)
         }
         .padding()
         .background(Color(.systemBackground))

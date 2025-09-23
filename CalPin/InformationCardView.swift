@@ -25,6 +25,7 @@ enum SortOption: String, CaseIterable {
 
 struct InformationCardView: View {
     let places: [Place]
+    let userToken: String
     @State private var selectedSort: SortOption = .mostRecent
     @State private var showingFilters = false
     @State private var selectedPlace: Place?
@@ -131,7 +132,7 @@ struct InformationCardView: View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: 16) {
                 ForEach(sortedPlaces) { place in
-                    CardView(place: place)
+                    CardView(place: place, userToken: userToken)
                         .padding(.horizontal)
                         .onTapGesture {
                             selectedPlace = place
@@ -223,7 +224,7 @@ struct InformationCardView_Previews: PreviewProvider {
             )
         ]
         
-        InformationCardView(places: samplePlaces)
+        InformationCardView(places: samplePlaces, userToken: "sample_token")
             .previewLayout(.sizeThatFits)
     }
 }

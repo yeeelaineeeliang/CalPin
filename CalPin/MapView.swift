@@ -2,7 +2,7 @@
 //  MapView.swift
 //  CalPin
 //
-//  Clean production map view without debug elements
+//  Fixed implementation with exhaustive switches and proper VStack handling
 //
 
 import SwiftUI
@@ -11,6 +11,7 @@ import Alamofire
 import SwiftyJSON
 import Foundation
 
+// Helper function to create Place from JSON - keep existing implementation
 func createPlace(from json: [String: Any]) -> Place? {
     guard
         let title = json["title"] as? String,
@@ -26,15 +27,24 @@ func createPlace(from json: [String: Any]) -> Place? {
 
     let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     
-    // Parse additional fields with defaults
+    let id: String
+    if let idString = json["id"] as? String {
+        id = idString
+    } else if let idInt = json["id"] as? Int {
+        id = String(idInt)
+    } else {
+        print("❌ No valid ID found in JSON")
+        return nil
+    }
+    
     let urgencyString = json["urgencyLevel"] as? String ?? "Medium"
     let urgencyLevel = UrgencyLevel(rawValue: urgencyString) ?? .medium
     let statusString = json["status"] as? String ?? "Open"
     let status = RequestStatus(rawValue: statusString) ?? .open
     let authorName = json["authorName"] as? String ?? "Anonymous"
     let helpersCount = json["helpersCount"] as? Int ?? 0
+    let isCurrentUserHelping = json["isCurrentUserHelping"] as? Bool ?? false
     
-    // Parse dates
     let createdAt: Date
     if let createdAtString = json["createdAt"] as? String {
         let formatter = ISO8601DateFormatter()
@@ -47,6 +57,7 @@ func createPlace(from json: [String: Any]) -> Place? {
     let duration = json["duration"] as? String ?? "3min"
 
     return Place(
+        id: id,
         title: title,
         coordinate: coordinate,
         description: description,
@@ -57,7 +68,8 @@ func createPlace(from json: [String: Any]) -> Place? {
         status: status,
         createdAt: createdAt,
         authorName: authorName,
-        helpersCount: helpersCount
+        helpersCount: helpersCount,
+        isCurrentUserHelping: isCurrentUserHelping
     )
 }
 
@@ -84,7 +96,7 @@ struct MapView: View {
     @State private var userLocation: CLLocationCoordinate2D?
     @State private var showingLocationAlert = false
     @State private var lastRefreshTime = Date()
-    @State private var refreshTimer: Timer?
+    // @State private var refreshTimer: Timer? // 🔥 REMOVED: No more auto-refresh timer
     
     private let locationManager = CLLocationManager()
 
@@ -116,10 +128,11 @@ struct MapView: View {
             .onAppear {
                 setupLocationServices()
                 refreshData()
-                startAutoRefresh()
+                setupNotificationObservers() // 🔥 NEW: Setup observers for manual refresh
             }
             .onDisappear {
-                stopAutoRefresh()
+                // stopAutoRefresh() // 🔥 REMOVED: No auto-refresh to stop
+                removeNotificationObservers() // 🔥 NEW: Clean up observers
             }
             .onChange(of: token) { newToken in
                 print("🔄 Token changed, refreshing data...")
@@ -128,10 +141,10 @@ struct MapView: View {
                 }
             }
             
-            // Map controls - cleaned up, no debug button
+            // Map controls
             VStack(spacing: 12) {
-                // Refresh button with status indicator
-                Button(action: refreshData) {
+                // 🔥 ENHANCED: Manual refresh button with better visual feedback
+                Button(action: manualRefresh) {
                     VStack(spacing: 2) {
                         Image(systemName: "arrow.clockwise")
                             .font(.title2)
@@ -176,6 +189,38 @@ struct MapView: View {
         }
     }
     
+    // 🔥 NEW: Setup notification observers for manual refresh triggers
+    private func setupNotificationObservers() {
+        // Listen for manual refresh requests (from new request creation, help offers, etc.)
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("RefreshMapData"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            print("🔄 Manual refresh requested via notification")
+            self.refreshData()
+        }
+        
+        // Listen for app becoming active (user returns to app)
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            // Only refresh if it's been more than 1 minute since last refresh
+            if Date().timeIntervalSince(self.lastRefreshTime) > 60 {
+                print("🔄 App became active, refreshing data")
+                self.refreshData()
+            }
+        }
+    }
+    
+    // 🔥 NEW: Remove notification observers
+    private func removeNotificationObservers() {
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RefreshMapData"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+    }
+    
     private func setupLocationServices() {
         locationManager.requestWhenInUseAuthorization()
         
@@ -183,7 +228,6 @@ struct MapView: View {
         case .authorizedWhenInUse, .authorizedAlways:
             if let location = locationManager.location {
                 userLocation = location.coordinate
-                // Center map on user location
                 withAnimation {
                     region.center = location.coordinate
                 }
@@ -208,18 +252,11 @@ struct MapView: View {
         }
     }
     
-    private func startAutoRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { _ in
-            if !token.isEmpty && !isRefreshing {
-                print("⏰ Auto-refreshing data...")
-                refreshData()
-            }
-        }
-    }
     
-    private func stopAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
+    // 🔥 NEW: Manual refresh function (called by button or notifications)
+    private func manualRefresh() {
+        print("👆 Manual refresh button tapped")
+        refreshData()
     }
     
     private func refreshData() {
@@ -232,7 +269,7 @@ struct MapView: View {
         selectedPlace = nil
         lastRefreshTime = Date()
         
-        print("🔄 Manual refresh initiated...")
+        print("🔄 Refreshing data...")
         
         obs.fetchData {
             DispatchQueue.main.async {
@@ -244,10 +281,8 @@ struct MapView: View {
     }
     
     private func updateAnnotations() {
-        // Only use fetched data - no sample pin
         let allPlaces = obs.datas
         
-        // Only update if annotations actually changed to prevent unnecessary re-renders
         if !areAnnotationsEqual(annotations, allPlaces) {
             withAnimation(.easeInOut(duration: 0.3)) {
                 annotations = allPlaces
@@ -271,17 +306,26 @@ struct MapView: View {
     }
 }
 
-// Enhanced pin view with urgency indicators
+// 🔥 FIXED: Enhanced pin view with proper status handling
 struct EnhancedPinView: View {
     let place: Place
     let isSelected: Bool
     
     private var urgencyColor: Color {
-        switch place.urgencyLevel {
-        case .low: return .green
-        case .medium: return .orange
-        case .high: return .red
-        case .urgent: return .purple
+        place.urgencyLevel.color
+    }
+    
+    // 🔥 FIXED: Status-aware pin color with exhaustive switch
+    private var pinColor: Color {
+        switch place.status {
+        case .open:
+            return urgencyColor
+        case .inProgress:
+            return Color.orange
+        case .completed:
+            return Color.green
+        case .cancelled:
+            return Color.gray
         }
     }
     
@@ -292,19 +336,38 @@ struct EnhancedPinView: View {
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
-                // Outer ring for selection
+                // Pulsing ring for urgent requests (only if still open)
+                if place.urgencyLevel.shouldPulse && place.status == .open {
+                    Circle()
+                        .stroke(urgencyColor, lineWidth: 2)
+                        .frame(width: pinSize + 20, height: pinSize + 20)
+                        .scaleEffect(1.0)
+                        .opacity(0.0)
+                        .animation(
+                            .easeInOut(duration: 1.5)
+                            .repeatForever(autoreverses: true),
+                            value: true
+                        )
+                }
+                
+                // Selection ring
                 if isSelected {
                     Circle()
-                        .stroke(urgencyColor, lineWidth: 3)
-                        .frame(width: pinSize + 10, height: pinSize + 10)
-                        .scaleEffect(isSelected ? 1.2 : 1.0)
-                        .opacity(0.6)
+                        .stroke(pinColor.opacity(0.4), lineWidth: 4)
+                        .frame(width: pinSize + 12, height: pinSize + 12)
+                        .scaleEffect(1.2)
                         .animation(.easeInOut(duration: 0.3), value: isSelected)
                 }
                 
-                // Main pin
+                // Main pin with status-aware color
                 Circle()
-                    .fill(urgencyColor)
+                    .fill(
+                        LinearGradient(
+                            colors: [pinColor, pinColor.opacity(0.8)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .frame(width: pinSize, height: pinSize)
                     .overlay(
                         Circle()
@@ -312,66 +375,142 @@ struct EnhancedPinView: View {
                     )
                     .overlay(
                         VStack(spacing: 1) {
-                            Image(systemName: iconForPlace(place))
+                            // Main icon - same for consistency
+                            Image(systemName: "hand.raised.fill")
                                 .font(.system(size: pinSize * 0.4, weight: .bold))
                                 .foregroundColor(.white)
                             
+                            // Show helper count prominently
                             if place.helpersCount > 0 {
                                 Text("\(place.helpersCount)")
-                                    .font(.system(size: 8, weight: .bold))
+                                    .font(.system(size: pinSize * 0.25, weight: .bold))
                                     .foregroundColor(.white)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.black.opacity(0.3))
+                                            .frame(width: pinSize * 0.4, height: pinSize * 0.4)
+                                    )
                             }
                         }
                     )
-                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                    .shadow(color: pinColor.opacity(0.4), radius: 6, x: 0, y: 3)
                 
-                // Urgency indicator for urgent requests
-                if place.urgencyLevel == .urgent {
-                    Circle()
-                        .stroke(urgencyColor, lineWidth: 2)
-                        .frame(width: pinSize + 20, height: pinSize + 20)
-                        .scaleEffect(1.0)
-                        .opacity(0.0)
-                        .animation(
-                            .easeInOut(duration: 1.0)
-                            .repeatForever(autoreverses: true),
-                            value: true
-                        )
-                        .onAppear {
-                            // This creates the pulsing effect for urgent requests
-                        }
-                }
+                // 🔥 FIXED: Status indicators with proper VStack structure
+                statusIndicatorOverlay
             }
             
-            // Title label (only show when selected)
+            // Enhanced label when selected
             if isSelected {
-                Text(place.title)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.9))
-                    .cornerRadius(8)
-                    .shadow(radius: 2)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 120)
-                    .transition(.opacity.combined(with: .scale))
+                selectedPinLabel
             }
         }
         .scaleEffect(isSelected ? 1.1 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
     }
     
-    private func iconForPlace(_ place: Place) -> String {
-        // You could categorize requests and show different icons
-        // For now, use urgency-based icons
-        switch place.urgencyLevel {
-        case .low: return "hand.raised"
-        case .medium: return "hand.raised.fill"
-        case .high: return "exclamationmark"
-        case .urgent: return "exclamationmark.triangle.fill"
+    // 🔥 FIXED: Separate status indicator overlay to avoid VStack issues
+    private var statusIndicatorOverlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+                
+                // Status indicator dot
+                if place.status != .open {
+                    Circle()
+                        .fill(statusIndicatorColor())
+                        .frame(width: 10, height: 10)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white, lineWidth: 2)
+                        )
+                        .overlay(
+                            Image(systemName: statusIcon())
+                                .font(.system(size: 6, weight: .bold))
+                                .foregroundColor(.white)
+                        )
+                        .offset(x: 2, y: -2)
+                }
+            }
+            Spacer()
+        }
+        .frame(width: pinSize, height: pinSize)
+    }
+    
+    // 🔥 FIXED: Separate selected pin label to avoid VStack issues
+    private var selectedPinLabel: some View {
+        VStack(spacing: 3) {
+            Text(place.title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            
+            // Show status for in-progress requests
+            if place.status == .inProgress {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                    Text("In Progress")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .fontWeight(.medium)
+                    
+                    if place.helpersCount > 0 {
+                        Text("(\(place.helpersCount) helping)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.orange.opacity(0.15))
+                .cornerRadius(8)
+            } else {
+                Text(place.urgencyLevel.timeExpectation ?? "")
+                    .font(.caption2)
+                    .foregroundColor(urgencyColor)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(urgencyColor.opacity(0.15))
+                    .cornerRadius(6)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.95))
+        .cornerRadius(12)
+        .shadow(radius: 4)
+        .frame(maxWidth: 140)
+        .transition(.opacity.combined(with: .scale))
+    }
+    
+    // 🔥 FIXED: Helper functions with exhaustive switches
+    private func statusIndicatorColor() -> Color {
+        switch place.status {
+        case .open:
+            return .blue
+        case .inProgress:
+            return .orange
+        case .completed:
+            return .green
+        case .cancelled:
+            return .red
+        }
+    }
+    
+    private func statusIcon() -> String {
+        switch place.status {
+        case .open:
+            return ""
+        case .inProgress:
+            return "clock"
+        case .completed:
+            return "checkmark"
+        case .cancelled:
+            return "xmark"
         }
     }
 }
@@ -389,7 +528,6 @@ class observer: ObservableObject {
             if token != oldValue {
                 print("🔑 Observer token updated (length: \(token.count))")
                 if !token.isEmpty {
-                    // Auto-fetch when token is set
                     fetchData {}
                 }
             }
@@ -436,7 +574,6 @@ class observer: ObservableObject {
                         let json = JSON(value)
                         print("📊 Raw response: \(json)")
                         
-                        // Process each request only once
                         if let requestsArray = json.array {
                             var newPlaces: [Place] = []
                             for requestJson in requestsArray {
@@ -449,7 +586,6 @@ class observer: ObservableObject {
                             self?.datas = newPlaces
                             print("✅ Fetched \(newPlaces.count) requests")
                             
-                            // Extract database status from response if available
                             if let responseData = response.data,
                                let responseString = String(data: responseData, encoding: .utf8) {
                                 if responseString.contains("database_used") {
@@ -477,7 +613,6 @@ class observer: ObservableObject {
             }
     }
     
-    // Test method to verify connectivity
     func testConnection() {
         let testURL = "\(NetworkConfig.baseURL)/health"
         print("🧪 Testing connection to: \(testURL)")

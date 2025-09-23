@@ -865,55 +865,399 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
 });
 
 // 🔥 NEW: GET /api/user/stats - User statistics
+// Enhanced user stats implementation for server.js
+// Replace the existing /api/user/stats endpoint
 app.get('/api/user/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log('📊 Fetching dynamic stats for user:', req.user.email);
     
     let stats = {
       requestsMade: 0,
       peopleHelped: 0,
       communityPoints: 0,
-      thisWeek: 0
+      thisWeek: 0,
+      currentStreak: 0,
+      totalConnectionsMade: 0,
+      avgResponseTime: 0,
+      completionRate: 0,
+      joinDate: new Date(),
+      lastActivity: null,
+      topCategories: [],
+      weeklyActivity: []
     };
 
     if (databaseConnected) {
       try {
-        // Get user's requests
-        const requestsResult = await db.pool.query(
-          'SELECT COUNT(*) as count FROM help_requests WHERE author_id = $1',
-          [userId]
-        );
+        const client = await db.pool.connect();
         
-        // Get help offers made by user
-        const helpResult = await db.pool.query(
-          'SELECT COUNT(*) as count FROM help_offers WHERE helper_id = $1',
-          [userId]
-        );
-        
-        // Get recent activity (this week)
-        const weekAgoResult = await db.pool.query(`
-          SELECT COUNT(*) as count FROM help_offers 
-          WHERE helper_id = $1 AND created_at > NOW() - INTERVAL '7 days'
-        `, [userId]);
+        try {
+          // 1. Get user's requests made
+          const requestsResult = await client.query(
+            'SELECT COUNT(*) as count, MIN(created_at) as first_request FROM help_requests WHERE author_id = $1',
+            [userId]
+          );
+          stats.requestsMade = parseInt(requestsResult.rows[0].count) || 0;
+          
+          // 2. Get help offers made by user (people helped)
+          const helpResult = await client.query(`
+            SELECT COUNT(DISTINCT ho.request_id) as unique_requests_helped,
+                   COUNT(*) as total_help_offers,
+                   MAX(ho.created_at) as last_help_offered
+            FROM help_offers ho 
+            WHERE ho.helper_id = $1
+          `, [userId]);
+          
+          const helpStats = helpResult.rows[0];
+          stats.peopleHelped = parseInt(helpStats.unique_requests_helped) || 0;
+          stats.lastActivity = helpStats.last_help_offered;
 
-        stats = {
-          requestsMade: parseInt(requestsResult.rows[0].count),
-          peopleHelped: parseInt(helpResult.rows[0].count),
-          communityPoints: parseInt(helpResult.rows[0].count) * 10 + parseInt(requestsResult.rows[0].count) * 2,
-          thisWeek: parseInt(weekAgoResult.rows[0].count)
-        };
+          // 3. Get recent activity (this week)
+          const weekAgoResult = await client.query(`
+            SELECT COUNT(DISTINCT ho.request_id) as requests_helped_this_week,
+                   COUNT(*) as total_actions_this_week
+            FROM help_offers ho 
+            WHERE ho.helper_id = $1 AND ho.created_at > NOW() - INTERVAL '7 days'
+          `, [userId]);
+          
+          stats.thisWeek = parseInt(weekAgoResult.rows[0].requests_helped_this_week) || 0;
+
+          // 4. Calculate community points (dynamic scoring system)
+          const pointsResult = await client.query(`
+            SELECT 
+              COUNT(DISTINCT ho.request_id) as unique_requests_helped,
+              COUNT(CASE WHEN hr.urgency_level = 'Urgent' THEN 1 END) as urgent_helps,
+              COUNT(CASE WHEN hr.urgency_level = 'High' THEN 1 END) as high_helps,
+              COUNT(CASE WHEN hr.urgency_level = 'Medium' THEN 1 END) as medium_helps,
+              COUNT(CASE WHEN hr.urgency_level = 'Low' THEN 1 END) as low_helps,
+              COUNT(CASE WHEN ho.created_at > NOW() - INTERVAL '24 hours' THEN 1 END) as quick_responses
+            FROM help_offers ho
+            JOIN help_requests hr ON ho.request_id = hr.id
+            WHERE ho.helper_id = $1
+          `, [userId]);
+
+          const points = pointsResult.rows[0];
+          // Dynamic point calculation
+          stats.communityPoints = 
+            (parseInt(points.urgent_helps) || 0) * 25 +     // 25 points for urgent help
+            (parseInt(points.high_helps) || 0) * 15 +       // 15 points for high priority
+            (parseInt(points.medium_helps) || 0) * 10 +     // 10 points for medium priority
+            (parseInt(points.low_helps) || 0) * 5 +         // 5 points for low priority
+            (parseInt(points.quick_responses) || 0) * 5 +   // 5 bonus points for quick responses
+            stats.requestsMade * 2;                         // 2 points for each request made
+
+          // 5. Calculate current streak (consecutive weeks with at least 1 help)
+          const streakResult = await client.query(`
+            WITH weekly_activity AS (
+              SELECT 
+                DATE_TRUNC('week', ho.created_at) as week,
+                COUNT(DISTINCT ho.request_id) as helps_count
+              FROM help_offers ho
+              WHERE ho.helper_id = $1
+                AND ho.created_at >= NOW() - INTERVAL '20 weeks'
+              GROUP BY DATE_TRUNC('week', ho.created_at)
+              ORDER BY week DESC
+            ),
+            streak_calc AS (
+              SELECT 
+                week,
+                helps_count,
+                ROW_NUMBER() OVER (ORDER BY week DESC) as week_rank,
+                CASE 
+                  WHEN helps_count > 0 THEN 1 
+                  ELSE 0 
+                END as has_activity
+              FROM weekly_activity
+            )
+            SELECT COUNT(*) as streak
+            FROM streak_calc 
+            WHERE has_activity = 1 
+              AND week_rank <= (
+                SELECT COALESCE(MIN(week_rank), 0)
+                FROM streak_calc 
+                WHERE has_activity = 0 AND week_rank > 0
+              )
+          `, [userId]);
+
+          stats.currentStreak = parseInt(streakResult.rows[0].streak) || 0;
+
+          // 6. Calculate completion rate
+          const completionResult = await client.query(`
+            SELECT 
+              COUNT(*) as total_requests_made,
+              COUNT(CASE WHEN hr.status = 'Completed' THEN 1 END) as completed_requests
+            FROM help_requests hr
+            WHERE hr.author_id = $1
+          `, [userId]);
+
+          const completion = completionResult.rows[0];
+          if (parseInt(completion.total_requests_made) > 0) {
+            stats.completionRate = Math.round(
+              (parseInt(completion.completed_requests) / parseInt(completion.total_requests_made)) * 100
+            );
+          }
+
+          // 7. Get weekly activity for the past 7 weeks
+          const weeklyActivityResult = await client.query(`
+            SELECT 
+              DATE_TRUNC('week', ho.created_at) as week,
+              COUNT(DISTINCT ho.request_id) as helps_count
+            FROM help_offers ho
+            WHERE ho.helper_id = $1
+              AND ho.created_at >= NOW() - INTERVAL '7 weeks'
+            GROUP BY DATE_TRUNC('week', ho.created_at)
+            ORDER BY week DESC
+            LIMIT 7
+          `, [userId]);
+
+          stats.weeklyActivity = weeklyActivityResult.rows.map(row => ({
+            week: row.week,
+            helpsCount: parseInt(row.helps_count)
+          }));
+
+          // 8. Get user join date
+          const userResult = await client.query(
+            'SELECT created_at FROM users WHERE id = $1',
+            [userId]
+          );
+          
+          if (userResult.rows.length > 0) {
+            stats.joinDate = userResult.rows[0].created_at;
+          }
+
+          // 9. Calculate total connections made (unique people helped + people who helped user)
+          const connectionsResult = await client.query(`
+            SELECT COUNT(DISTINCT connections.user_id) as total_connections
+            FROM (
+              SELECT hr.author_id as user_id
+              FROM help_offers ho
+              JOIN help_requests hr ON ho.request_id = hr.id
+              WHERE ho.helper_id = $1
+              UNION
+              SELECT ho.helper_id as user_id
+              FROM help_offers ho
+              JOIN help_requests hr ON ho.request_id = hr.id
+              WHERE hr.author_id = $1
+            ) connections
+            WHERE connections.user_id != $1
+          `, [userId, userId]);
+
+          stats.totalConnectionsMade = parseInt(connectionsResult.rows[0].total_connections) || 0;
+
+          console.log('✅ Dynamic stats calculated successfully:', stats);
+          
+        } finally {
+          client.release();
+        }
         
-        console.log('✅ User stats retrieved from database');
       } catch (dbError) {
-        console.log('❌ Database stats failed:', dbError.message);
-        // Use fallback calculation
+        console.log('❌ Database stats calculation failed:', dbError.message);
+        // Return default stats if database fails
+        stats = {
+          requestsMade: 0,
+          peopleHelped: 0,
+          communityPoints: 0,
+          thisWeek: 0,
+          currentStreak: 0,
+          totalConnectionsMade: 0,
+          completionRate: 0,
+          joinDate: new Date(),
+          lastActivity: null,
+          weeklyActivity: []
+        };
       }
+    } else {
+      // Fallback calculation using in-memory data
+      const userRequests = fallbackRequests.filter(r => r.authorId === userId);
+      const userHelps = fallbackRequests.filter(r => 
+        r.helpers && r.helpers.includes(userId) ||
+        r.completedHelpers && r.completedHelpers.includes(userId)
+      );
+
+      stats.requestsMade = userRequests.length;
+      stats.peopleHelped = userHelps.length;
+      stats.communityPoints = userHelps.length * 10 + userRequests.length * 2;
+      
+      // Calculate this week's activity
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+      stats.thisWeek = userHelps.filter(r => new Date(r.createdAt) > oneWeekAgo).length;
     }
 
     res.json(stats);
   } catch (error) {
     console.error('❌ User stats error:', error);
     res.status(500).json({ error: 'Failed to get user stats' });
+  }
+});
+
+// 🔥 NEW: GET /api/user/achievements - Get user achievements
+app.get('/api/user/achievements', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log('🏆 Fetching achievements for user:', req.user.email);
+
+    let achievements = [];
+
+    if (databaseConnected) {
+      try {
+        // Get user stats first
+        const statsResponse = await fetch(`${req.protocol}://${req.get('host')}/api/user/stats`, {
+          headers: {
+            'Authorization': req.headers.authorization
+          }
+        });
+        
+        if (statsResponse.ok) {
+          const stats = await statsResponse.json();
+          
+          // Define achievement criteria and calculate earned achievements
+          const achievementCriteria = [
+            {
+              id: 'first_help',
+              name: 'First Helper',
+              description: 'Offered help for the first time',
+              icon: '🤝',
+              condition: stats.peopleHelped >= 1,
+              progress: Math.min(stats.peopleHelped, 1),
+              target: 1
+            },
+            {
+              id: 'helper_5',
+              name: 'Community Helper',
+              description: 'Helped 5 different people',
+              icon: '⭐',
+              condition: stats.peopleHelped >= 5,
+              progress: stats.peopleHelped,
+              target: 5
+            },
+            {
+              id: 'helper_25',
+              name: 'Super Helper',
+              description: 'Helped 25 different people',
+              icon: '🌟',
+              condition: stats.peopleHelped >= 25,
+              progress: stats.peopleHelped,
+              target: 25
+            },
+            {
+              id: 'streak_1',
+              name: 'Week Warrior',
+              description: 'Maintained a 1-week helping streak',
+              icon: '🔥',
+              condition: stats.currentStreak >= 1,
+              progress: stats.currentStreak,
+              target: 1
+            },
+            {
+              id: 'streak_4',
+              name: 'Monthly Champion',
+              description: 'Maintained a 4-week helping streak',
+              icon: '🏆',
+              condition: stats.currentStreak >= 4,
+              progress: stats.currentStreak,
+              target: 4
+            },
+            {
+              id: 'points_100',
+              name: 'Point Collector',
+              description: 'Earned 100 community points',
+              icon: '💎',
+              condition: stats.communityPoints >= 100,
+              progress: stats.communityPoints,
+              target: 100
+            },
+            {
+              id: 'requester',
+              name: 'Help Seeker',
+              description: 'Made your first help request',
+              icon: '🙋‍♂️',
+              condition: stats.requestsMade >= 1,
+              progress: Math.min(stats.requestsMade, 1),
+              target: 1
+            }
+          ];
+
+          achievements = achievementCriteria.map(achievement => ({
+            ...achievement,
+            earned: achievement.condition,
+            earnedAt: achievement.condition ? stats.joinDate : null // Simplified - in real app, track actual earn dates
+          }));
+        }
+
+      } catch (error) {
+        console.log('❌ Achievement calculation failed:', error.message);
+      }
+    }
+
+    res.json(achievements);
+  } catch (error) {
+    console.error('❌ Achievements error:', error);
+    res.status(500).json({ error: 'Failed to get achievements' });
+  }
+});
+
+// 🔥 NEW: GET /api/user/activity-timeline - Get user activity timeline
+app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const limit = parseInt(req.query.limit) || 20;
+    
+    console.log('📅 Fetching activity timeline for user:', req.user.email);
+
+    let timeline = [];
+
+    if (databaseConnected) {
+      try {
+        const result = await db.pool.query(`
+          SELECT 
+            'help_offered' as activity_type,
+            ho.created_at as timestamp,
+            hr.title as request_title,
+            hr.urgency_level,
+            hr.author_name,
+            ho.request_id,
+            NULL as status_change
+          FROM help_offers ho
+          JOIN help_requests hr ON ho.request_id = hr.id
+          WHERE ho.helper_id = $1
+          
+          UNION ALL
+          
+          SELECT 
+            'request_created' as activity_type,
+            hr.created_at as timestamp,
+            hr.title as request_title,
+            hr.urgency_level,
+            NULL as author_name,
+            hr.id as request_id,
+            hr.status as status_change
+          FROM help_requests hr
+          WHERE hr.author_id = $1
+          
+          ORDER BY timestamp DESC
+          LIMIT $2
+        `, [userId, limit]);
+
+        timeline = result.rows.map(row => ({
+          activityType: row.activity_type,
+          timestamp: row.timestamp,
+          requestTitle: row.request_title,
+          urgencyLevel: row.urgency_level,
+          authorName: row.author_name,
+          requestId: row.request_id,
+          statusChange: row.status_change
+        }));
+
+      } catch (dbError) {
+        console.log('❌ Timeline query failed:', dbError.message);
+      }
+    }
+
+    res.json(timeline);
+  } catch (error) {
+    console.error('❌ Activity timeline error:', error);
+    res.status(500).json({ error: 'Failed to get activity timeline' });
   }
 });
 

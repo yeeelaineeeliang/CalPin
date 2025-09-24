@@ -910,7 +910,10 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           
           const helpStats = helpResult.rows[0];
           stats.peopleHelped = parseInt(helpStats.unique_requests_helped) || 0;
-          stats.lastActivity = helpStats.last_help_offered;
+          // Convert lastActivity to ISO string if it exists
+          if (helpStats.last_help_offered) {
+            stats.lastActivity = new Date(helpStats.last_help_offered).toISOString();
+          }
 
           // 3. Get recent activity (this week)
           const weekAgoResult = await client.query(`
@@ -1011,18 +1014,20 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           `, [userId]);
 
           stats.weeklyActivity = weeklyActivityResult.rows.map(row => ({
-            week: row.week,
+            week: row.week.toISOString(),
             helpsCount: parseInt(row.helps_count)
           }));
 
-          // 8. Get user join date
+          // 8. Get user join date from users table
           const userResult = await client.query(
             'SELECT created_at FROM users WHERE id = $1',
             [userId]
           );
           
           if (userResult.rows.length > 0) {
-            stats.joinDate = userResult.rows[0].created_at;
+            stats.joinDate = userResult.rows[0].created_at.toISOString();
+          } else {
+            stats.joinDate = new Date().toISOString();
           }
 
           // 9. Calculate total connections made (unique people helped + people who helped user)
@@ -1101,95 +1106,122 @@ app.get('/api/user/achievements', authenticateToken, async (req, res) => {
 
     if (databaseConnected) {
       try {
-        // Get user stats first
-        const statsResponse = await fetch(`${req.protocol}://${req.get('host')}/api/user/stats`, {
-          headers: {
-            'Authorization': req.headers.authorization
-          }
-        });
+        // Get user stats first by calling our stats endpoint
+        const statsResult = await db.pool.query(`
+          SELECT 
+            COUNT(DISTINCT hr.id) as requests_made,
+            COUNT(DISTINCT ho.request_id) as people_helped,
+            COUNT(DISTINCT ho.request_id) * 10 + COUNT(DISTINCT hr.id) * 2 as community_points
+          FROM users u
+          LEFT JOIN help_requests hr ON hr.author_id = u.id  
+          LEFT JOIN help_offers ho ON ho.helper_id = u.id
+          WHERE u.id = $1
+        `, [userId]);
         
-        if (statsResponse.ok) {
-          const stats = await statsResponse.json();
-          
-          // Define achievement criteria and calculate earned achievements
-          const achievementCriteria = [
-            {
-              id: 'first_help',
-              name: 'First Helper',
-              description: 'Offered help for the first time',
-              icon: '🤝',
-              condition: stats.peopleHelped >= 1,
-              progress: Math.min(stats.peopleHelped, 1),
-              target: 1
-            },
-            {
-              id: 'helper_5',
-              name: 'Community Helper',
-              description: 'Helped 5 different people',
-              icon: '⭐',
-              condition: stats.peopleHelped >= 5,
-              progress: stats.peopleHelped,
-              target: 5
-            },
-            {
-              id: 'helper_25',
-              name: 'Super Helper',
-              description: 'Helped 25 different people',
-              icon: '🌟',
-              condition: stats.peopleHelped >= 25,
-              progress: stats.peopleHelped,
-              target: 25
-            },
-            {
-              id: 'streak_1',
-              name: 'Week Warrior',
-              description: 'Maintained a 1-week helping streak',
-              icon: '🔥',
-              condition: stats.currentStreak >= 1,
-              progress: stats.currentStreak,
-              target: 1
-            },
-            {
-              id: 'streak_4',
-              name: 'Monthly Champion',
-              description: 'Maintained a 4-week helping streak',
-              icon: '🏆',
-              condition: stats.currentStreak >= 4,
-              progress: stats.currentStreak,
-              target: 4
-            },
-            {
-              id: 'points_100',
-              name: 'Point Collector',
-              description: 'Earned 100 community points',
-              icon: '💎',
-              condition: stats.communityPoints >= 100,
-              progress: stats.communityPoints,
-              target: 100
-            },
-            {
-              id: 'requester',
-              name: 'Help Seeker',
-              description: 'Made your first help request',
-              icon: '🙋‍♂️',
-              condition: stats.requestsMade >= 1,
-              progress: Math.min(stats.requestsMade, 1),
-              target: 1
-            }
-          ];
+        const stats = statsResult.rows[0];
+        const requestsMade = parseInt(stats.requests_made) || 0;
+        const peopleHelped = parseInt(stats.people_helped) || 0;
+        const communityPoints = parseInt(stats.community_points) || 0;
+        
+        // Calculate current streak (simplified)
+        const streakResult = await db.pool.query(`
+          SELECT COUNT(DISTINCT DATE_TRUNC('week', ho.created_at)) as active_weeks
+          FROM help_offers ho
+          WHERE ho.helper_id = $1 
+            AND ho.created_at >= NOW() - INTERVAL '4 weeks'
+        `, [userId]);
+        
+        const currentStreak = parseInt(streakResult.rows[0].active_weeks) || 0;
+        
+        // Define achievement criteria and calculate earned achievements
+        const achievementCriteria = [
+          {
+            id: 'first_help',
+            name: 'First Helper',
+            description: 'Offered help for the first time',
+            icon: '🤝',
+            condition: peopleHelped >= 1,
+            progress: Math.min(peopleHelped, 1),
+            target: 1,
+            earned: peopleHelped >= 1,
+            earnedAt: peopleHelped >= 1 ? new Date().toISOString() : null
+          },
+          {
+            id: 'helper_5',
+            name: 'Community Helper',
+            description: 'Helped 5 different people',
+            icon: '⭐',
+            condition: peopleHelped >= 5,
+            progress: peopleHelped,
+            target: 5,
+            earned: peopleHelped >= 5,
+            earnedAt: peopleHelped >= 5 ? new Date().toISOString() : null
+          },
+          {
+            id: 'helper_25',
+            name: 'Super Helper',
+            description: 'Helped 25 different people',
+            icon: '🌟',
+            condition: peopleHelped >= 25,
+            progress: peopleHelped,
+            target: 25,
+            earned: peopleHelped >= 25,
+            earnedAt: peopleHelped >= 25 ? new Date().toISOString() : null
+          },
+          {
+            id: 'streak_1',
+            name: 'Week Warrior',
+            description: 'Maintained a 1-week helping streak',
+            icon: '🔥',
+            condition: currentStreak >= 1,
+            progress: currentStreak,
+            target: 1,
+            earned: currentStreak >= 1,
+            earnedAt: currentStreak >= 1 ? new Date().toISOString() : null
+          },
+          {
+            id: 'streak_4',
+            name: 'Monthly Champion',
+            description: 'Maintained a 4-week helping streak',
+            icon: '🏆',
+            condition: currentStreak >= 4,
+            progress: currentStreak,
+            target: 4,
+            earned: currentStreak >= 4,
+            earnedAt: currentStreak >= 4 ? new Date().toISOString() : null
+          },
+          {
+            id: 'points_100',
+            name: 'Point Collector',
+            description: 'Earned 100 community points',
+            icon: '💎',
+            condition: communityPoints >= 100,
+            progress: communityPoints,
+            target: 100,
+            earned: communityPoints >= 100,
+            earnedAt: communityPoints >= 100 ? new Date().toISOString() : null
+          },
+          {
+            id: 'requester',
+            name: 'Help Seeker',
+            description: 'Made your first help request',
+            icon: '🙋‍♂️',
+            condition: requestsMade >= 1,
+            progress: Math.min(requestsMade, 1),
+            target: 1,
+            earned: requestsMade >= 1,
+            earnedAt: requestsMade >= 1 ? new Date().toISOString() : null
+          }
+        ];
 
-          achievements = achievementCriteria.map(achievement => ({
-            ...achievement,
-            earned: achievement.condition,
-            earnedAt: achievement.condition ? stats.joinDate : null // Simplified - in real app, track actual earn dates
-          }));
-        }
+        achievements = achievementCriteria;
 
       } catch (error) {
         console.log('❌ Achievement calculation failed:', error.message);
       }
     }
 
+    console.log(`✅ Returning ${achievements.length} achievements`);
     res.json(achievements);
   } catch (error) {
     console.error('❌ Achievements error:', error);
@@ -1216,7 +1248,7 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
             hr.title as request_title,
             hr.urgency_level,
             hr.author_name,
-            ho.request_id,
+            ho.request_id::text,
             NULL as status_change
           FROM help_offers ho
           JOIN help_requests hr ON ho.request_id = hr.id
@@ -1230,7 +1262,7 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
             hr.title as request_title,
             hr.urgency_level,
             NULL as author_name,
-            hr.id as request_id,
+            hr.id::text as request_id,
             hr.status as status_change
           FROM help_requests hr
           WHERE hr.author_id = $1
@@ -1241,13 +1273,15 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
 
         timeline = result.rows.map(row => ({
           activityType: row.activity_type,
-          timestamp: row.timestamp,
+          timestamp: row.timestamp.toISOString(),
           requestTitle: row.request_title,
           urgencyLevel: row.urgency_level,
           authorName: row.author_name,
-          requestId: row.request_id,
+          requestId: parseInt(row.request_id),
           statusChange: row.status_change
         }));
+
+        console.log(`✅ Activity timeline: ${timeline.length} items`);
 
       } catch (dbError) {
         console.log('❌ Timeline query failed:', dbError.message);

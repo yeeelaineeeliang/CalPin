@@ -352,166 +352,166 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
 });
 
 // POST /api/create - Create a new help request
-app.post('/api/create', authenticateToken, async (req, res) => {
-  try {
-    console.log('\n🔧 === CREATE REQUEST DEBUG ===');
-    console.log('🔨 Request received from:', req.user.email);
-    console.log('  Body received:', JSON.stringify(req.body, null, 2));
+// app.post('/api/create', authenticateToken, async (req, res) => {
+//   try {
+//     console.log('\n🔧 === CREATE REQUEST DEBUG ===');
+//     console.log('🔨 Request received from:', req.user.email);
+//     console.log('  Body received:', JSON.stringify(req.body, null, 2));
     
-    // Handle both direct object and nested object structures
-    let requestData = req.body;
+//     // Handle both direct object and nested object structures
+//     let requestData = req.body;
     
-    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
-      const firstKey = Object.keys(req.body)[0];
-      if (typeof req.body[firstKey] === 'object') {
-        console.log(' Detected wrapped data, unwrapping...');
-        requestData = req.body[firstKey];
-      }
-    }
+//     if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
+//       const firstKey = Object.keys(req.body)[0];
+//       if (typeof req.body[firstKey] === 'object') {
+//         console.log(' Detected wrapped data, unwrapping...');
+//         requestData = req.body[firstKey];
+//       }
+//     }
     
-    console.log(' Final request data:', JSON.stringify(requestData, null, 2));
+//     console.log(' Final request data:', JSON.stringify(requestData, null, 2));
     
-    const {
-      caption: title,
-      description,
-      address,
-      contact,
-      urgencyLevel = 'Medium',
-      latitude,
-      longitude
-    } = requestData;
+//     const {
+//       caption: title,
+//       description,
+//       address,
+//       contact,
+//       urgencyLevel = 'Medium',
+//       latitude,
+//       longitude
+//     } = requestData;
 
-    console.log(' Extracted fields:');
-    console.log('  - title:', title);
-    console.log('  - description:', description);
-    console.log('  - address:', address);
-    console.log('  - contact:', contact);
-    console.log('  - urgencyLevel:', urgencyLevel);
-    console.log('  - latitude:', latitude);
-    console.log('  - longitude:', longitude);
-    console.log('  - user:', req.user);
+//     console.log(' Extracted fields:');
+//     console.log('  - title:', title);
+//     console.log('  - description:', description);
+//     console.log('  - address:', address);
+//     console.log('  - contact:', contact);
+//     console.log('  - urgencyLevel:', urgencyLevel);
+//     console.log('  - latitude:', latitude);
+//     console.log('  - longitude:', longitude);
+//     console.log('  - user:', req.user);
 
-    // Validation
-    if (!title || !description || !address || !contact) {
-      console.log('  Validation failed - missing required fields');
-      return res.status(400).json({ 
-        error: 'Missing required fields: title, description, address, contact',
-        received: { title: !!title, description: !!description, address: !!address, contact: !!contact }
-      });
-    }
+//     // Validation
+//     if (!title || !description || !address || !contact) {
+//       console.log('  Validation failed - missing required fields');
+//       return res.status(400).json({ 
+//         error: 'Missing required fields: title, description, address, contact',
+//         received: { title: !!title, description: !!description, address: !!address, contact: !!contact }
+//       });
+//     }
 
-    if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
-      console.log('  Validation failed - invalid coordinates');
-      return res.status(400).json({ 
-        error: 'Invalid location coordinates',
-        received: { latitude, longitude }
-      });
-    }
+//     if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+//       console.log('  Validation failed - invalid coordinates');
+//       return res.status(400).json({ 
+//         error: 'Invalid location coordinates',
+//         received: { latitude, longitude }
+//       });
+//     }
 
-    const validUrgencyLevels = ['Low', 'Medium', 'High', 'Urgent'];
-    if (!validUrgencyLevels.includes(urgencyLevel)) {
-      console.log('  Validation failed - invalid urgency level');
-      return res.status(400).json({ 
-        error: 'Invalid urgency level. Must be: Low, Medium, High, or Urgent',
-        received: urgencyLevel
-      });
-    }
+//     const validUrgencyLevels = ['Low', 'Medium', 'High', 'Urgent'];
+//     if (!validUrgencyLevels.includes(urgencyLevel)) {
+//       console.log('  Validation failed - invalid urgency level');
+//       return res.status(400).json({ 
+//         error: 'Invalid urgency level. Must be: Low, Medium, High, or Urgent',
+//         received: urgencyLevel
+//       });
+//     }
 
-    let newRequest;
+//     let newRequest;
 
-    if (databaseConnected) {
-      try {
-        console.log(' Creating request in database...');
-        console.log(' User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
+//     if (databaseConnected) {
+//       try {
+//         console.log(' Creating request in database...');
+//         console.log(' User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
         
-        newRequest = await db.createRequest({
-          title,
-          description,
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
-          contact,
-          urgencyLevel,
-          authorId: req.user.id,
-          authorName: req.user.name
-        });
-        console.log('  Request created in database with ID:', newRequest.id);
+//         newRequest = await db.createRequest({
+//           title,
+//           description,
+//           latitude: parseFloat(latitude),
+//           longitude: parseFloat(longitude),
+//           contact,
+//           urgencyLevel,
+//           authorId: req.user.id,
+//           authorName: req.user.name
+//         });
+//         console.log('  Request created in database with ID:', newRequest.id);
         
-        // Verify the request was saved
-        try {
-          const verifyRequests = await db.getActiveRequests();
-          const foundRequest = verifyRequests.find(r => r.id.toString() === newRequest.id.toString());
-          if (foundRequest) {
-            console.log('Request verified in database');
-          } else {
-            console.log('Request not found in verification check');
-          }
-        } catch (verifyError) {
-          console.log(' Could not verify request creation:', verifyError.message);
-        }
+//         // Verify the request was saved
+//         try {
+//           const verifyRequests = await db.getActiveRequests();
+//           const foundRequest = verifyRequests.find(r => r.id.toString() === newRequest.id.toString());
+//           if (foundRequest) {
+//             console.log('Request verified in database');
+//           } else {
+//             console.log('Request not found in verification check');
+//           }
+//         } catch (verifyError) {
+//           console.log(' Could not verify request creation:', verifyError.message);
+//         }
         
-      } catch (dbError) {
-        console.log('  Database create failed:', dbError.message);
-        console.log(' Falling back to in-memory storage');
+//       } catch (dbError) {
+//         console.log('  Database create failed:', dbError.message);
+//         console.log(' Falling back to in-memory storage');
         
-        newRequest = {
-          id: Date.now().toString(),
-          title,
-          description,
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
-          contact,
-          urgencyLevel,
-          status: 'Open',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          authorId: req.user.id,
-          authorName: req.user.name,
-          helpersCount: 0,
-          helpers: []
-        };
-        fallbackRequests.push(newRequest);
-        databaseConnected = false;
-      }
-    } else {
-      console.log('  Using fallback in-memory storage');
-      newRequest = {
-        id: Date.now().toString(),
-        title,
-        description,
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        contact,
-        urgencyLevel,
-        status: 'Open',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        authorId: req.user.id,
-        authorName: req.user.name,
-        helpersCount: 0,
-        helpers: []
-      };
-      fallbackRequests.push(newRequest);
-    }
+//         newRequest = {
+//           id: Date.now().toString(),
+//           title,
+//           description,
+//           latitude: parseFloat(latitude),
+//           longitude: parseFloat(longitude),
+//           contact,
+//           urgencyLevel,
+//           status: 'Open',
+//           createdAt: new Date(),
+//           updatedAt: new Date(),
+//           authorId: req.user.id,
+//           authorName: req.user.name,
+//           helpersCount: 0,
+//           helpers: []
+//         };
+//         fallbackRequests.push(newRequest);
+//         databaseConnected = false;
+//       }
+//     } else {
+//       console.log('  Using fallback in-memory storage');
+//       newRequest = {
+//         id: Date.now().toString(),
+//         title,
+//         description,
+//         latitude: parseFloat(latitude),
+//         longitude: parseFloat(longitude),
+//         contact,
+//         urgencyLevel,
+//         status: 'Open',
+//         createdAt: new Date(),
+//         updatedAt: new Date(),
+//         authorId: req.user.id,
+//         authorName: req.user.name,
+//         helpersCount: 0,
+//         helpers: []
+//       };
+//       fallbackRequests.push(newRequest);
+//     }
 
-    console.log(' Request created successfully with ID:', newRequest.id);
-    console.log('Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
-    console.log(' === END CREATE REQUEST DEBUG ===\n');
+//     console.log(' Request created successfully with ID:', newRequest.id);
+//     console.log('Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
+//     console.log(' === END CREATE REQUEST DEBUG ===\n');
 
-    res.status(201).json({
-      message: 'Request created successfully',
-      request: newRequest,
-      database_used: databaseConnected
-    });
+//     res.status(201).json({
+//       message: 'Request created successfully',
+//       request: newRequest,
+//       database_used: databaseConnected
+//     });
 
-  } catch (error) {
-    console.error('  Create error:', error);
-    console.error('  Error stack:', error.stack);
-    res.status(500).json({ 
-      error: 'Failed to create request',
-      details: error.message 
-    });
-  }
-});
+//   } catch (error) {
+//     console.error('  Create error:', error);
+//     console.error('  Error stack:', error.stack);
+//     res.status(500).json({ 
+//       error: 'Failed to create request',
+//       details: error.message 
+//     });
+//   }
+// });
 
 // POST /api/requests/:id/offer-help - Offer help for a request
 app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => {

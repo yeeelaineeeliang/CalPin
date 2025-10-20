@@ -91,7 +91,7 @@ async function initDatabase() {
       );
     `);
 
-    console.log(' Base tables created successfully');
+    console.log('✅ Base tables created successfully');
     
     // Migrate help_offers columns
     await migrateHelpOffersColumns();
@@ -109,9 +109,9 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_chat_history_user ON ai_chat_history(user_id);
     `);
 
-    console.log(' Database initialized successfully with AI features');
+    console.log('✅ Database initialized successfully with AI features');
   } catch (error) {
-    console.error(' Database initialization error:', error);
+    console.error('❌ Database initialization error:', error);
     throw error;
   }
 }
@@ -144,9 +144,9 @@ async function migrateHelpOffersColumns() {
       END $;
     `);
     
-    console.log(' help_offers columns migrated successfully');
+    console.log('✅ help_offers columns migrated successfully');
   } catch (error) {
-    console.error(' help_offers column migration error:', error);
+    console.error('❌ help_offers column migration error:', error);
     throw error;
   }
 }
@@ -156,95 +156,34 @@ async function migrateAIColumns() {
   try {
     console.log('🔄 Running AI column migration...');
     
-    await pool.query(`
-      DO $$ 
-      BEGIN
-        -- Add ai_category if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_category'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_category VARCHAR(50);
-          RAISE NOTICE 'Added ai_category column';
-        END IF;
-        
-        -- Add ai_category_icon if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_category_icon'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_category_icon VARCHAR(10);
-          RAISE NOTICE 'Added ai_category_icon column';
-        END IF;
-        
-        -- Add ai_category_name if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_category_name'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_category_name VARCHAR(100);
-          RAISE NOTICE 'Added ai_category_name column';
-        END IF;
-        
-        -- Add ai_detected_urgency if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_detected_urgency'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_detected_urgency VARCHAR(20);
-          RAISE NOTICE 'Added ai_detected_urgency column';
-        END IF;
-        
-        -- Add ai_estimated_time if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_estimated_time'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_estimated_time INTEGER;
-          RAISE NOTICE 'Added ai_estimated_time column';
-        END IF;
-        
-        -- Add ai_tags if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_tags'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_tags TEXT[];
-          RAISE NOTICE 'Added ai_tags column';
-        END IF;
-        
-        -- Add ai_suggested_title if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_suggested_title'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_suggested_title VARCHAR(500);
-          RAISE NOTICE 'Added ai_suggested_title column';
-        END IF;
-        
-        -- Add ai_safety_check if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_safety_check'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_safety_check VARCHAR(20) DEFAULT 'safe';
-          RAISE NOTICE 'Added ai_safety_check column';
-        END IF;
-        
-        -- Add ai_safety_reason if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_requests' AND column_name='ai_safety_reason'
-        ) THEN
-          ALTER TABLE help_requests ADD COLUMN ai_safety_reason TEXT;
-          RAISE NOTICE 'Added ai_safety_reason column';
-        END IF;
-      END $$;
-    `);
+    const columnsToAdd = [
+      { name: 'ai_category', type: 'VARCHAR(50)' },
+      { name: 'ai_category_icon', type: 'VARCHAR(10)' },
+      { name: 'ai_category_name', type: 'VARCHAR(100)' },
+      { name: 'ai_detected_urgency', type: 'VARCHAR(20)' },
+      { name: 'ai_estimated_time', type: 'INTEGER' },
+      { name: 'ai_tags', type: 'TEXT[]' },
+      { name: 'ai_suggested_title', type: 'VARCHAR(500)' },
+      { name: 'ai_safety_check', type: "VARCHAR(20) DEFAULT 'safe'" },
+      { name: 'ai_safety_reason', type: 'TEXT' }
+    ];
     
-    console.log('AI columns migrated successfully');
+    for (const column of columnsToAdd) {
+      const checkResult = await pool.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name='help_requests' AND column_name=$1
+      `, [column.name]);
+      
+      if (checkResult.rows.length === 0) {
+        await pool.query(`ALTER TABLE help_requests ADD COLUMN ${column.name} ${column.type}`);
+        console.log(`✅ Added ${column.name} column`);
+      }
+    }
+    
+    console.log('✅ AI columns migrated successfully');
   } catch (error) {
-    console.error('AI column migration error:', error);
+    console.error('❌ AI column migration error:', error);
     throw error;
   }
 }
@@ -313,7 +252,7 @@ const db = {
        aiEstimatedTime, aiTags, aiSuggestedTitle, aiSafetyCheck, aiSafetyReason]
     );
     
-    console.log(' Request created with ID:', result.rows[0].id);
+    console.log('✅ Request created with ID:', result.rows[0].id);
     return result.rows[0];
   },
 
@@ -386,9 +325,9 @@ const db = {
          VALUES ($1, $2, $3)`,
         [requestId, insightType, JSON.stringify(insightData)]
       );
-      console.log(' AI insight saved for request:', requestId);
+      console.log('✅ AI insight saved for request:', requestId);
     } catch (error) {
-      console.error(' Failed to save AI insight:', error.message);
+      console.error('❌ Failed to save AI insight:', error.message);
     }
   },
 

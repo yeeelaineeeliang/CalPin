@@ -29,6 +29,8 @@ struct ContentView: View {
     @State private var cardHeight: CGFloat = 300
     @State private var isDragging = false
     
+    @State private var selectedCategory: AICategory? = nil
+    
     // Color scheme
     private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
     private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
@@ -86,12 +88,21 @@ struct ContentView: View {
     }
     
     private var mainAppView: some View {
-        ZStack {
-            // Map view using shared observer
-            MapView(token: $userSession.token, selectedPlace: $selectedPlace, observer: sharedObserver)
-                .ignoresSafeArea(.all)
+        let filteredPlaces = selectedCategory == nil
+            ? sharedObserver.datas
+            : sharedObserver.datas.filter { $0.category == selectedCategory }
+        
+        return ZStack {
+            // Map view with filtered data AND binding to selectedCategory
+            MapView(
+                token: $userSession.token,
+                selectedPlace: $selectedPlace,
+                observer: sharedObserver,
+                selectedCategory: $selectedCategory
+            )
+            .ignoresSafeArea(.all)
             
-            // Profile button at top-left only (no refresh indicator here)
+            // Profile button at top-left
             VStack {
                 HStack {
                     Button(action: { showingProfile.toggle() }) {
@@ -118,14 +129,14 @@ struct ContentView: View {
                 Spacer()
             }
             
-            // Add request button in bottom-right
+            // Add request button
             VStack {
                 Spacer()
                 HStack {
                     Spacer()
                     
                     VStack(spacing: 12) {
-                        // Single manual refresh button - only show when there's data and not loading
+                        // Refresh button
                         if !sharedObserver.datas.isEmpty && !sharedObserver.isLoading {
                             Button(action: {
                                 handleManualRefresh()
@@ -160,13 +171,12 @@ struct ContentView: View {
             }
             .padding(.trailing, 20)
             .padding(.bottom, cardOffset + 20)
-            
             // Draggable bottom card using shared observer
             VStack {
                 Spacer()
                 DraggableCardView(
                     selectedPlace: $selectedPlace,
-                    places: sharedObserver.datas,
+                    places: filteredPlaces,
                     offset: $cardOffset,
                     isDragging: $isDragging,
                     userToken: userSession.token // Pass the token here
@@ -174,9 +184,11 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showingRequestView) {
-            RequestView(token: $userSession.token) {
-                handleRequestCreated()
-            }
+            RequestView(
+                    token: $userSession.token,
+                    userEmail: userSession.userEmail,
+                    onRequestCreated: handleRequestCreated
+                )
         }
         .sheet(isPresented: $showingProfile) {
             ProfileView(

@@ -28,7 +28,11 @@ struct RequestView: View {
     @State private var caption: String = ""
     @State private var description: String = ""
     @State private var address: String = ""
-    @State private var contact: String = ""
+    
+    @State private var contactEmail: String = ""
+    @State private var contactPhone: String = ""
+    @State private var includePhone: Bool = false
+    
     @State private var selectedUrgency: UrgencyLevel = .medium
     @State private var isGettingLocation: Bool = false
     @State private var currentLocation: CLLocationCoordinate2D?
@@ -43,10 +47,13 @@ struct RequestView: View {
     private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
     private let lightBlue = Color(red: 189/255, green: 229/255, blue: 242/255)
     
-    init(token: Binding<String>, onRequestCreated: @escaping () -> Void = {}) {
+    init(token: Binding<String>,
+         userEmail: String = "",
+         onRequestCreated: @escaping () -> Void = {}) {
         _token = token
         self.onRequestCreated = onRequestCreated
         post_obs = post_observer(token: self._token.wrappedValue)
+        _contactEmail = State(initialValue: userEmail)
     }
     
     var body: some View {
@@ -214,16 +221,7 @@ struct RequestView: View {
             }
             
             // Contact field
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Contact Information", systemImage: "envelope")
-                    .font(.headline)
-                    .foregroundColor(berkeleyBlue)
-                
-                TextField("Your Berkeley email", text: $contact)
-                    .textFieldStyle(CustomTextFieldStyle())
-                    .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
-            }
+            contactSection
         }
         .padding()
         .background(Color.white)
@@ -254,12 +252,130 @@ struct RequestView: View {
         .disabled(!isFormValid || post_obs.isLoading)
         .padding(.horizontal)
     }
+    private func formatPhoneNumber(_ number: String) -> String {
+        let cleaned = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        let limited = String(cleaned.prefix(10))
+        
+        var formatted = ""
+        for (index, character) in limited.enumerated() {
+            if index == 0 {
+                formatted += "("
+            } else if index == 3 {
+                formatted += ") "
+            } else if index == 6 {
+                formatted += "-"
+            }
+            formatted.append(character)
+        }
+        
+        return formatted
+    }
+
+    // Combine email and phone for submission
+    private var finalContactInfo: String {
+        if includePhone && !contactPhone.isEmpty {
+            return "\(contactEmail) | \(contactPhone)"
+        } else {
+            return contactEmail
+        }
+    }
+    
+    private var contactSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with security icon
+            HStack {
+                Label("Contact Information", systemImage: "person.text.rectangle")
+                    .font(.headline)
+                    .foregroundColor(berkeleyBlue)
+                
+                Spacer()
+                
+                Image(systemName: "lock.shield.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            }
+            
+            // Email field (pre-filled, disabled)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "envelope.fill")
+                        .foregroundColor(berkeleyBlue)
+                        .font(.caption)
+                    Text("Email")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text("(Required)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                TextField("Your Berkeley email", text: $contactEmail)
+                    .textFieldStyle(CustomTextFieldStyle())
+                    .keyboardType(.emailAddress)
+                    .autocapitalization(.none)
+                    .disabled(true)  // Locked
+                    .foregroundColor(.primary)
+                    .opacity(0.8)  // Slightly dimmed to show it's locked
+            }
+            
+            // Phone number toggle
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $includePhone.animation(.spring())) {
+                    HStack {
+                        Image(systemName: "phone.fill")
+                            .foregroundColor(berkeleyBlue)
+                            .font(.caption)
+                        Text("Phone Number")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("(Optional)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .tint(berkeleyBlue)
+                
+                // Phone field (conditionally shown)
+                if includePhone {
+                    TextField("(123) 456-7890", text: $contactPhone)
+                        .textFieldStyle(CustomTextFieldStyle())
+                        .keyboardType(.phonePad)
+                        .onChange(of: contactPhone) { newValue in
+                            contactPhone = formatPhoneNumber(newValue)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            
+            // Privacy note
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundColor(.blue)
+                    .font(.caption)
+                
+                Text("Your contact info will only be visible to students who want to help.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.blue.opacity(0.05))
+            .cornerRadius(8)
+        }
+        .padding()
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.1), radius: 5)
+    }
     
     private var isFormValid: Bool {
-        !caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !contact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !caption.isEmpty &&
+        !description.isEmpty &&
+        !address.isEmpty &&
+        !contactEmail.isEmpty &&
+        contactEmail.contains("@") &&
+        contactEmail.contains(".") &&
+        currentLocation != nil
     }
     
     private func getCurrentLocation() {
@@ -337,7 +453,7 @@ struct RequestView: View {
             caption: caption.trimmingCharacters(in: .whitespacesAndNewlines),
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             address: address.trimmingCharacters(in: .whitespacesAndNewlines),
-            contact: contact.trimmingCharacters(in: .whitespacesAndNewlines),
+            contact: finalContactInfo, 
             urgencyLevel: selectedUrgency.rawValue,
             latitude: finalCoordinates.latitude,
             longitude: finalCoordinates.longitude

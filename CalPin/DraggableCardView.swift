@@ -14,9 +14,9 @@ struct DraggableCardView: View {
     let userToken: String 
     
     // Card position states
-    private let minOffset: CGFloat = 100   // Minimized card height
-    private let midOffset: CGFloat = 300   // Default height
-    private let maxOffset: CGFloat = 600   // Maximum height
+    private let minOffset: CGFloat = 100
+    private let midOffset: CGFloat = 300
+    private let maxOffset: CGFloat = 600
     
     var body: some View {
         GeometryReader { geometry in

@@ -10,7 +10,6 @@ import SwiftyJSON
 import Foundation
 import CoreLocation
 
-// Location Manager for iPhone Maps-like behavior
 class LocationManager: NSObject, ObservableObject {
     private let locationManager = CLLocationManager()
     
@@ -200,38 +199,45 @@ struct MapView: View {
     @State private var showingLocationAlert = false
     @State private var lastRefreshTime = Date()
     @State private var isLocating = false // Track if we're currently getting location
-    @State private var selectedCategory: AICategory? = nil
     @State private var showCategoryFilter = true
+    @Binding var selectedCategory: AICategory?
     
     @StateObject private var locationManager = LocationManager()
     
 
-    init(token: Binding<String>, selectedPlace: Binding<Place?>, observer: observer) {
+    init(token: Binding<String>,
+         selectedPlace: Binding<Place?>,
+         observer: observer,
+         selectedCategory: Binding<AICategory?>) {
         self._token = token
         self._selectedPlace = selectedPlace
         self.obs = observer
+        self._selectedCategory = selectedCategory
         _annotations = State(initialValue: [])
     }
     
-    
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Map(coordinateRegion: $region,
-                showsUserLocation: true,
-                annotationItems: annotations) { place in
-                MapAnnotation(coordinate: place.coordinate) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            self.selectedPlace = place
+        let displayedPins = selectedCategory == nil
+                ? annotations
+                : annotations.filter { $0.category == selectedCategory }
+            
+            return ZStack(alignment: .topTrailing) {
+                Map(coordinateRegion: $region,
+                    showsUserLocation: true,
+                    annotationItems: displayedPins) { place in
+                    MapAnnotation(coordinate: place.coordinate) {
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                self.selectedPlace = place
+                            }
+                        }) {
+                            EnhancedPinView(
+                                place: place,
+                                isSelected: selectedPlace?.id == place.id
+                            )
                         }
-                    }) {
-                        EnhancedPinView(
-                            place: place,
-                            isSelected: selectedPlace?.id == place.id
-                        )
                     }
                 }
-            }
             .onAppear {
                 setupLocationServices()
                 refreshData()
@@ -241,7 +247,7 @@ struct MapView: View {
                 removeNotificationObservers()
             }
             .onChange(of: token) { newToken in
-                print("🔄 Token changed, refreshing data...")
+                print("Token changed, refreshing data...")
                 if !newToken.isEmpty {
                     refreshData()
                 }
@@ -251,8 +257,21 @@ struct MapView: View {
                     userLocation = location
                 }
             }
+            .onChange(of: selectedCategory) { newCategory in
+                // Clear selection if filtered out
+                if let selected = selectedPlace,
+                   let category = newCategory,
+                   selected.category != category {
+                    withAnimation {
+                        selectedPlace = nil
+                    }
+                }
+                
+                print("Filtering to: \(newCategory?.displayName ?? "All")")
+                print("Showing \(displayedPins.count) of \(annotations.count) pins")
+            }
             
-            // NEW: Category Filter Bar (top of screen)
+            // Category Filter Bar (top of screen)
             VStack(spacing: 0) {
                 if showCategoryFilter {
                     CategoryFilterView(
@@ -721,7 +740,6 @@ struct EnhancedPinView: View {
     }
 }
 
-// Enhanced observer class with better state management and debugging
 class observer: ObservableObject {
     @Published var datas = [Place]()
     @Published var isLoading = false
@@ -754,9 +772,6 @@ class observer: ObservableObject {
         isLoading = true
         errorMessage = nil
         
-        // Clear the array at the start
-        self.datas.removeAll()
-        
         let fullURL = "\(NetworkConfig.baseURL)\(NetworkConfig.endpoints.fetch)"
         print("🌐 Attempting to fetch from: \(fullURL)")
         print("🔑 Using token length: \(token.count)")
@@ -768,7 +783,7 @@ class observer: ObservableObject {
         
         AF.request(fullURL, method: .get, headers: headers)
             .validate()
-            .responseJSON { [weak self] response in
+            .responseData { [weak self] response in
                 DispatchQueue.main.async {
                     self?.isLoading = false
                     self?.lastRefresh = Date()
@@ -776,33 +791,55 @@ class observer: ObservableObject {
                     print("📊 Response status: \(response.response?.statusCode ?? 0)")
                     
                     switch response.result {
-                    case .success(let value):
-                        let json = JSON(value)
-                        print("📊 Raw response: \(json)")
+                    case .success(let data):
+                        // Print raw JSON for debugging
+                        if let jsonString = String(data: data, encoding: .utf8) {
+                            print("📊 Raw response preview: \(jsonString.prefix(500))...")
+                        }
                         
-                        if let requestsArray = json.array {
-                            var newPlaces: [Place] = []
-                            for requestJson in requestsArray {
-                                if let placeData = requestJson.dictionaryObject,
-                                   let place = createPlace(from: placeData) {
-                                    newPlaces.append(place)
-                                }
+                        // Configure JSONDecoder with proper date decoding
+                        let decoder = JSONDecoder()
+                        decoder.dateDecodingStrategy = .iso8601
+                        
+                        
+                        do {
+                            let places = try decoder.decode([Place].self, from: data)
+                            self?.datas = places
+                            print("✅ Successfully decoded \(places.count) requests")
+                            
+                            // Print first place for verification
+                            if let firstPlace = places.first {
+                                print("📍 First place: \(firstPlace.title) at (\(firstPlace.coordinate.latitude), \(firstPlace.coordinate.longitude))")
                             }
                             
-                            self?.datas = newPlaces
-                            print("✅ Fetched \(newPlaces.count) requests")
+                        } catch let DecodingError.keyNotFound(key, context) {
+                            print("❌ Decoding error - Key '\(key.stringValue)' not found")
+                            print("   Context: \(context.debugDescription)")
+                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            self?.errorMessage = "Missing key: \(key.stringValue)"
                             
-                            if let responseData = response.data,
-                               let responseString = String(data: responseData, encoding: .utf8) {
-                                if responseString.contains("database_used") {
-                                    self?.lastDatabaseStatus = "connected"
-                                } else {
-                                    self?.lastDatabaseStatus = "fallback"
-                                }
-                            }
-                        } else {
-                            print("⚠️ Response is not an array")
-                            self?.errorMessage = "Invalid response format"
+                        } catch let DecodingError.typeMismatch(type, context) {
+                            print("❌ Decoding error - Type mismatch for type \(type)")
+                            print("   Context: \(context.debugDescription)")
+                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            self?.errorMessage = "Type mismatch: \(type)"
+                            
+                        } catch let DecodingError.valueNotFound(type, context) {
+                            print("❌ Decoding error - Value of type \(type) not found")
+                            print("   Context: \(context.debugDescription)")
+                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            self?.errorMessage = "Value not found: \(type)"
+                            
+                        } catch let DecodingError.dataCorrupted(context) {
+                            print("❌ Decoding error - Data corrupted")
+                            print("   Context: \(context.debugDescription)")
+                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            self?.errorMessage = "Data corrupted"
+                            
+                        } catch {
+                            print("❌ Unknown decoding error: \(error)")
+                            print("   Error description: \(error.localizedDescription)")
+                            self?.errorMessage = error.localizedDescription
                         }
                         
                         completion()
@@ -821,18 +858,18 @@ class observer: ObservableObject {
     
     func testConnection() {
         let testURL = "\(NetworkConfig.baseURL)/health"
-        print("🧪 Testing connection to: \(testURL)")
+        print("Testing connection to: \(testURL)")
         
         AF.request(testURL, method: .get)
             .responseJSON { response in
-                print("\n🧪 === CONNECTION TEST ===")
-                print("📊 Status: \(response.response?.statusCode ?? 0)")
+                print("\n=== CONNECTION TEST ===")
+                print("Status: \(response.response?.statusCode ?? 0)")
                 if let data = response.data, let string = String(data: data, encoding: .utf8) {
-                    print("📊 Response: \(string)")
+                    print("Response: \(string)")
                 }
-                print("🧪 === END TEST ===\n")
+                print("=== END TEST ===\n")
             }
-        }
+    }
 }
 
 // Preview
@@ -841,7 +878,8 @@ struct MapView_Previews: PreviewProvider {
         MapView(
             token: .constant("sample_token"),
             selectedPlace: .constant(nil),
-            observer: observer(token: "sample_token")
+            observer: observer(token: "sample_token"),
+            selectedCategory: .constant(nil)
         )
     }
 }

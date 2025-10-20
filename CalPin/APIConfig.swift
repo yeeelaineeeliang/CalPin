@@ -1,4 +1,4 @@
-// NetworkConfig.swift - Updated with dynamic profile endpoints
+
 import Foundation
 
 struct NetworkConfig {

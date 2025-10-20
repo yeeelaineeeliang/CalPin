@@ -2,8 +2,7 @@
 //  ProfileView.swift
 //  CalPin
 //
-//  Dynamic profile view with real user statistics and achievements
-//
+
 
 import SwiftUI
 import Alamofire
@@ -14,32 +13,59 @@ struct UserStats: Codable {
     let peopleHelped: Int
     let communityPoints: Int
     let thisWeek: Int
-    let currentStreak: Int
-    let totalConnectionsMade: Int
+    let currentStreak: Int?
+    let totalConnectionsMade: Int?
     let avgResponseTime: Double?
-    let completionRate: Int
-    let joinDate: Date
-    let lastActivity: Date?
-    let weeklyActivity: [WeeklyActivity]
+    let completionRate: Int?
+    let joinDate: String?
+    let lastActivity: String?
+    let weeklyActivity: [WeeklyActivity]?
     
     // Computed properties for display
     var joinDateFormatted: String {
+        guard let joinDateString = joinDate,
+              let date = ISO8601DateFormatter().date(from: joinDateString) else {
+            return "Recently joined"
+        }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        return formatter.string(from: joinDate)
+        return formatter.string(from: date)
     }
     
     var lastActivityFormatted: String {
-        guard let lastActivity = lastActivity else { return "No recent activity" }
+        guard let lastActivityString = lastActivity,
+              let date = ISO8601DateFormatter().date(from: lastActivityString) else {
+            return "No recent activity"
+        }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
-        return formatter.localizedString(for: lastActivity, relativeTo: Date())
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+    
+    var safeCurrentStreak: Int {
+        return currentStreak ?? 0
+    }
+    
+    var safeTotalConnections: Int {
+        return totalConnectionsMade ?? 0
+    }
+    
+    var safeCompletionRate: Int {
+        return completionRate ?? 0
+    }
+    
+    var safeWeeklyActivity: [WeeklyActivity] {
+        return weeklyActivity ?? []
     }
 }
 
 struct WeeklyActivity: Codable {
-    let week: Date
+    let week: String
     let helpsCount: Int
+    
+    var weekDate: Date {
+        return ISO8601DateFormatter().date(from: week) ?? Date()
+    }
 }
 
 struct Achievement: Codable, Identifiable {
@@ -59,14 +85,18 @@ struct Achievement: Codable, Identifiable {
 
 struct ActivityTimelineItem: Codable, Identifiable {
     let activityType: String
-    let timestamp: Date
+    let timestamp: String
     let requestTitle: String
     let urgencyLevel: String
     let authorName: String?
     let requestId: Int
     let statusChange: String?
     
-    var id: String { "\(activityType)-\(requestId)-\(timestamp.timeIntervalSince1970)" }
+    var id: String { "\(activityType)-\(requestId)-\(timestamp)" }
+    
+    var timestampDate: Date {
+        return ISO8601DateFormatter().date(from: timestamp) ?? Date()
+    }
     
     var displayText: String {
         switch activityType {
@@ -187,7 +217,7 @@ struct ProfileView: View {
                     )
                 
                 // Streak indicator
-                if let stats = userStats, stats.currentStreak > 0 {
+                if let stats = userStats, stats.safeCurrentStreak > 0 {
                     VStack {
                         Spacer()
                         HStack {
@@ -279,8 +309,8 @@ struct ProfileView: View {
                     .padding()
             } else if let stats = userStats {
                 // Current streak highlight
-                if stats.currentStreak > 0 {
-                    streakCardView(streak: stats.currentStreak)
+                if stats.safeCurrentStreak > 0 {
+                    streakCardView(streak: stats.safeCurrentStreak)
                 }
                 
                 // Main stats grid
@@ -322,14 +352,14 @@ struct ProfileView: View {
                 VStack(spacing: 12) {
                     StatRowView(
                         title: "Total Connections",
-                        value: "\(stats.totalConnectionsMade)",
+                        value: "\(stats.safeTotalConnections)",
                         icon: "person.2.fill",
                         description: "Unique students you've interacted with"
                     )
                     
                     StatRowView(
                         title: "Completion Rate",
-                        value: "\(stats.completionRate)%",
+                        value: "\(stats.safeCompletionRate)%",
                         icon: "checkmark.circle.fill",
                         description: "Percentage of your requests that got help"
                     )
@@ -347,8 +377,8 @@ struct ProfileView: View {
                 .shadow(color: .black.opacity(0.05), radius: 4)
                 
                 // Weekly activity chart (simplified)
-                if !stats.weeklyActivity.isEmpty {
-                    weeklyActivityView(activity: stats.weeklyActivity)
+                if !stats.safeWeeklyActivity.isEmpty {
+                    weeklyActivityView(activity: stats.safeWeeklyActivity)
                 }
                 
             } else {
@@ -928,7 +958,7 @@ struct ActivityRowView: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
                 
-                Text(RelativeDateTimeFormatter().localizedString(for: item.timestamp, relativeTo: Date()))
+                Text(RelativeDateTimeFormatter().localizedString(for: item.timestampDate, relativeTo: Date()))
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
@@ -950,3 +980,5 @@ struct ActivityRowView: View {
         .padding(.vertical, 8)
     }
 }
+
+

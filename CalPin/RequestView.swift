@@ -2,8 +2,6 @@
 //  RequestView.swift
 //  CalPin
 //
-//  Enhanced request submission with urgency levels
-//
 
 import SwiftUI
 import CoreLocation
@@ -552,7 +550,6 @@ struct UrgencyOptionView: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 12) {
-                // 🔥 Icon with urgency-based color
                 ZStack {
                     Circle()
                         .fill(urgency.color.opacity(isSelected ? 0.3 : 0.1))
@@ -562,7 +559,6 @@ struct UrgencyOptionView: View {
                                 .stroke(urgency.color.opacity(isSelected ? 0.6 : 0.3), lineWidth: 2)
                         )
                     
-                    // 🔥 SAME ICON for consistency
                     Image(systemName: "hand.raised.fill")
                         .font(.system(size: 20, weight: .medium))
                         .foregroundColor(urgency.color)
@@ -574,7 +570,7 @@ struct UrgencyOptionView: View {
                         .fontWeight(isSelected ? .semibold : .medium)
                         .foregroundColor(.primary)
                     
-                    // 🔥 NEW: Show time expectation to help users choose
+                    // Show time expectation to help users choose
                     Text(urgency.timeExpectation)
                         .font(.caption2)
                         .foregroundColor(.secondary)

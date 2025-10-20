@@ -1,9 +1,8 @@
 //
-//  Enhanced CardView.swift
+//  CardView.swift
 //  CalPin
 //
-//  Dynamic card view with proper helper functionality
-//
+
 
 import SwiftUI
 import Alamofire
@@ -16,17 +15,38 @@ struct CardView: View {
     @State private var showingSuccess = false
     @State private var successMessage = ""
     
+    @EnvironmentObject var userSession: UserSession
+    
     // Color scheme
     private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
     private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
     
+    // Check if current user is the author of this request
+    private var isOwnRequest: Bool {
+        // We need to get the current user's ID from the backend
+        return place.authorName == userSession.userName
+    }
+    
+    // Check if user can offer help (combines all restrictions)
+    private var canOfferHelp: Bool {
+        return place.status == .open &&
+               !place.isCurrentUserHelping &&
+               !isOwnRequest
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // AI Category Header
+            categoryHeaderView
+            
             // Header with title and urgency
             headerView
             
             // Description
             descriptionView
+            
+            // AI Metadata (Time Estimate, Detected Urgency)
+            aiMetadataView
             
             // Location and timing info
             locationInfoView
@@ -51,7 +71,92 @@ struct CardView: View {
         }
     }
     
-    // MARK: - Header View
+    // AI Category Header
+    private var categoryHeaderView: some View {
+            HStack(spacing: 8) {
+                // Category icon and name
+                HStack(spacing: 6) {
+                    Text(place.aiCategoryIcon ?? place.category.icon)
+                        .font(.title3)
+                    
+                    Text(place.aiCategoryName ?? place.category.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(place.category.color)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(place.category.color.opacity(0.15))
+                )
+                
+                Spacer()
+                
+                // Time ago
+                Text(place.timeAgo)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    
+    // AI Tags View
+        private func tagsView(tags: [String]) -> some View {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(tags, id: \.self) { tag in
+                        Text("#\(tag)")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(place.category.color)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                Capsule()
+                                    .fill(place.category.color.opacity(0.1))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(place.category.color.opacity(0.3), lineWidth: 1)
+                            )
+                    }
+                }
+            }
+        }
+    
+    // AI Metadata View
+        private var aiMetadataView: some View {
+            HStack(spacing: 16) {
+                // Estimated time
+                if let timeEstimate = place.estimatedTimeFormatted {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Text(timeEstimate)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                // AI detected urgency (if different from user selected)
+                if let detectedUrgency = place.aiDetectedUrgency,
+                   detectedUrgency != place.urgencyLevel.rawValue {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Text("AI: \(detectedUrgency)")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+        }
+    
+    //  Header View
     private var headerView: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
@@ -61,9 +166,23 @@ struct CardView: View {
                     .foregroundColor(.primary)
                     .lineLimit(2)
                 
-                Text("by \(place.authorName)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                HStack {
+                    Text("by \(place.authorName)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    // Show "You" indicator for own requests
+                    if isOwnRequest {
+                        Text("(You)")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(berkeleyBlue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(berkeleyBlue.opacity(0.1))
+                            .cornerRadius(4)
+                    }
+                }
             }
             
             Spacer()
@@ -78,7 +197,7 @@ struct CardView: View {
         }
     }
     
-    // MARK: - Description View
+    // Description View
     private var descriptionView: some View {
         Text(place.description)
             .font(.subheadline)
@@ -87,7 +206,7 @@ struct CardView: View {
             .padding(.vertical, 4)
     }
     
-    // MARK: - Location Info View
+    // Location Info View
     private var locationInfoView: some View {
         HStack {
             // Distance and time
@@ -120,7 +239,7 @@ struct CardView: View {
         }
     }
     
-    // MARK: - Status Info View
+    // Status Info View
     private var statusInfoView: some View {
         HStack {
             // Helpers count
@@ -149,6 +268,20 @@ struct CardView: View {
                 }
             }
             
+            // Own request indicator
+            if isOwnRequest {
+                HStack(spacing: 4) {
+                    Image(systemName: "person.circle.fill")
+                        .foregroundColor(berkeleyBlue)
+                        .font(.caption)
+                    
+                    Text("Your request")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(berkeleyBlue)
+                }
+            }
+            
             Spacer()
             
             // Completion indicator
@@ -165,7 +298,7 @@ struct CardView: View {
         }
     }
     
-    // MARK: - Action Buttons View
+    // Action Buttons View
     private var actionButtonsView: some View {
         HStack(spacing: 12) {
             // Contact info button
@@ -228,50 +361,62 @@ struct CardView: View {
                     .background(californiaGold)
                     .cornerRadius(12)
                 }
-            } else {
-                // Offer help button
-                if place.status == .open {
-                    Button(action: offerHelp) {
-                        HStack(spacing: 6) {
-                            if isOfferingHelp {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "hand.raised.fill")
-                                    .font(.caption)
-                                Text("Offer Help")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(californiaGold)
-                        .cornerRadius(12)
-                    }
-                    .disabled(isOfferingHelp)
-                } else {
-                    // Status indicator for non-open requests
-                    HStack(spacing: 6) {
-                        Image(systemName: statusIcon)
-                            .font(.caption)
-                        Text(place.status.displayName)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(place.status.color)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(place.status.color.opacity(0.1))
-                    .cornerRadius(8)
+            } else if isOwnRequest {
+                // Own request - cannot offer help
+                HStack(spacing: 6) {
+                    Image(systemName: "person.circle.fill")
+                        .font(.caption)
+                    Text("Your Request")
+                        .font(.caption)
+                        .fontWeight(.medium)
                 }
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(12)
+            } else if canOfferHelp {
+                // Offer help button for other users' open requests
+                Button(action: offerHelp) {
+                    HStack(spacing: 6) {
+                        if isOfferingHelp {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "hand.raised.fill")
+                                .font(.caption)
+                            Text("Offer Help")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(californiaGold)
+                    .cornerRadius(12)
+                }
+                .disabled(isOfferingHelp)
+            } else {
+                // Status indicator for non-open requests
+                HStack(spacing: 6) {
+                    Image(systemName: statusIcon)
+                        .font(.caption)
+                    Text(place.status.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundColor(place.status.color)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(place.status.color.opacity(0.1))
+                .cornerRadius(8)
             }
         }
     }
     
-    // MARK: - Helper Properties
+    // Helper Properties
     
     private var statusIcon: String {
         switch place.status {
@@ -282,11 +427,18 @@ struct CardView: View {
         }
     }
     
-    // MARK: - Actions
+    // Actions
     
     private func offerHelp() {
         guard !userToken.isEmpty else {
             print("❌ No token available for offering help")
+            return
+        }
+        
+        // Double-check restrictions before making the request
+        guard canOfferHelp else {
+            successMessage = "You cannot offer help on this request."
+            showingSuccess = true
             return
         }
         
@@ -302,7 +454,7 @@ struct CardView: View {
             method: .post,
             headers: headers
         )
-        .responseJSON { [self] response in
+        .responseJSON { response in
             DispatchQueue.main.async {
                 self.isOfferingHelp = false
                 
@@ -320,10 +472,18 @@ struct CardView: View {
                     if let data = response.data,
                        let errorString = String(data: data, encoding: .utf8) {
                         print("❌ Server response: \(errorString)")
+                        
+                        // Handle specific error messages from backend
+                        if errorString.contains("cannot offer help on your own request") {
+                            successMessage = "You cannot offer help on your own request."
+                        } else if errorString.contains("already helping") {
+                            successMessage = "You are already helping with this request."
+                        } else {
+                            successMessage = "Failed to offer help. Please try again."
+                        }
+                    } else {
+                        successMessage = "Failed to offer help. Please try again."
                     }
-                    
-                    // Show error message
-                    successMessage = "Failed to offer help. Please try again."
                     showingSuccess = true
                 }
             }
@@ -348,7 +508,7 @@ struct CardView: View {
             method: .post,
             headers: headers
         )
-        .responseJSON { [self] response in
+        .responseJSON { response in
             DispatchQueue.main.async {
                 self.isOfferingHelp = false
                 
@@ -376,7 +536,7 @@ struct CardView: View {
     }
 }
 
-// MARK: - Contact Info View
+// Contact Info View
 struct ContactInfoView: View {
     let place: Place
     @Environment(\.presentationMode) var presentationMode

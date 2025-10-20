@@ -2,8 +2,7 @@
 //  ContentView.swift
 //  CalPin
 //
-//  Complete enhanced main view with dynamic profile integration and auto-refresh
-//
+
 
 import SwiftUI
 import GoogleSignInSwift
@@ -92,7 +91,7 @@ struct ContentView: View {
             MapView(token: $userSession.token, selectedPlace: $selectedPlace, observer: sharedObserver)
                 .ignoresSafeArea(.all)
             
-            // Profile button at top-left only
+            // Profile button at top-left only (no refresh indicator here)
             VStack {
                 HStack {
                     Button(action: { showingProfile.toggle() }) {
@@ -126,26 +125,19 @@ struct ContentView: View {
                     Spacer()
                     
                     VStack(spacing: 12) {
-                        // Manual refresh button with loading state
-                        if !sharedObserver.datas.isEmpty {
+                        // Single manual refresh button - only show when there's data and not loading
+                        if !sharedObserver.datas.isEmpty && !sharedObserver.isLoading {
                             Button(action: {
                                 handleManualRefresh()
                             }) {
-                                if sharedObserver.isLoading {
-                                    ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: berkeleyBlue))
-                                        .scaleEffect(0.7)
-                                } else {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(berkeleyBlue)
-                                }
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(berkeleyBlue)
                             }
                             .frame(width: 32, height: 32)
                             .background(Color.white)
                             .clipShape(Circle())
                             .shadow(radius: 4)
-                            .disabled(sharedObserver.isLoading)
                         }
                         
                         // Main add button
@@ -200,102 +192,131 @@ struct ContentView: View {
     
     private var signInView: some View {
         ScrollView {
-            VStack(spacing: 30) {
-                Spacer(minLength: 60)
-                
-                // App logo and title
-                VStack(spacing: 20) {
-                    Image(systemName: "map.fill")
-                        .font(.system(size: 80))
-                        .foregroundColor(californiaGold)
-                    
-                    Text("CalPin")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-                        .foregroundColor(berkeleyBlue)
-                    
-                    Text("Connect • Help • Thrive")
-                        .font(.title3)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Welcome message
-                VStack(spacing: 12) {
-                    Text("Welcome to UC Berkeley's")
-                        .font(.title2)
-                        .foregroundColor(berkeleyBlue)
-                    
-                    Text("Student Support Network")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(californiaGold)
-                    
-                    Text("Request help, offer support, and build community with fellow Bears")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                }
-                .padding()
-                .background(Color.white)
-                .cornerRadius(20)
-                .shadow(color: .black.opacity(0.1), radius: 10)
-                .padding(.horizontal, 20)
-                
-                // Features preview
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 16) {
-                    FeatureCard(
-                        icon: "map.circle.fill",
-                        title: "Find Help Nearby",
-                        description: "See requests from students around campus"
+            VStack(spacing: 0) {
+                ZStack {
+                    // Yellow background with transparency
+                    LinearGradient(
+                        colors: [lightGold.opacity(0.8), lightBlue.opacity(0.2)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
                     
-                    FeatureCard(
-                        icon: "hand.raised.circle.fill",
-                        title: "Offer Support",
-                        description: "Help fellow students when you can"
-                    )
-                    
-                    FeatureCard(
-                        icon: "clock.circle.fill",
-                        title: "Real-time Updates",
-                        description: "Get notified when help is available"
-                    )
-                    
-                    FeatureCard(
-                        icon: "shield.circle.fill",
-                        title: "Safe & Secure",
-                        description: "Berkeley-verified accounts only"
-                    )
+                    // Content in hero section
+                    VStack(spacing: 24) {
+                        Spacer(minLength: 60)
+                        
+                        // App title at the top
+                        VStack(spacing: 8) {
+                            Text("CalPin")
+                                .font(.largeTitle)
+                                .fontWeight(.bold)
+                                .foregroundColor(berkeleyBlue)
+                            
+                            Text("Connect • Help • Thrive")
+                                .font(.title3)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        // Large Oski logo below title
+                        Image("oski")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 160, height: 160) // Large logo size
+                            .clipShape(RoundedRectangle(cornerRadius: 24))
+                            .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 24)
+                                    .fill(Color.white.opacity(0.1))
+                            )
+                        
+                        Spacer(minLength: 40)
+                    }
                 }
-                .padding(.horizontal, 20)
+                .frame(height: UIScreen.main.bounds.height * 0.38)
                 
-                // Sign in section
-                VStack(spacing: 20) {
-                    Text("Sign in to get started:")
-                        .font(.headline)
-                        .foregroundColor(berkeleyBlue)
+                VStack(spacing: 24) {
+                    VStack(spacing: 8) {
+                        Text("Welcome to UC Berkeley's")
+                            .font(.title2)
+                            .foregroundColor(berkeleyBlue)
+                        
+                        Text("Student Support Network")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(californiaGold)
+                        
+                        Text("Request help, offer support, and build community with fellow Bears")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 10)
+                    .padding(.horizontal, 20)
+                    .padding(.top, -20) // Overlap slightly with hero section
+                
+                    // Features preview
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 12) {
+                        FeatureCard(
+                            icon: "map.circle.fill",
+                            title: "Find Help Nearby",
+                            description: "See requests from students around campus"
+                        )
+                        
+                        FeatureCard(
+                            icon: "hand.raised.circle.fill",
+                            title: "Offer Support",
+                            description: "Help fellow students when you can"
+                        )
+                        
+                        FeatureCard(
+                            icon: "clock.circle.fill",
+                            title: "Real-time Updates",
+                            description: "Get notified when help is available"
+                        )
+                        
+                        FeatureCard(
+                            icon: "shield.circle.fill",
+                            title: "Safe & Secure",
+                            description: "Berkeley-verified accounts only"
+                        )
+                    }
+                    .padding(.horizontal, 20)
                     
-                    GoogleSignInButton(action: handleSignInButton)
-                        .frame(height: 55)
-                        .cornerRadius(12)
-                        .shadow(radius: 4)
+                    // Sign in section
+                    VStack(spacing: 16) {
+                        Text("Sign in to get started:")
+                            .font(.headline)
+                            .foregroundColor(berkeleyBlue)
+                        
+                        GoogleSignInButton(action: handleSignInButton)
+                            .frame(height: 50)
+                            .cornerRadius(12)
+                            .shadow(radius: 4)
+                        
+                        Text("Use your Berkeley email to join the community")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .background(Color.white)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.1), radius: 10)
+                    .padding(.horizontal, 20)
                     
-                    Text("Use your Berkeley email to join the community")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
+                    Spacer(minLength: 40)
                 }
-                .padding()
-                .background(Color.white)
-                .cornerRadius(20)
-                .shadow(color: .black.opacity(0.1), radius: 10)
-                .padding(.horizontal, 20)
-                
-                Spacer(minLength: 40)
+                .background(Color(.systemGroupedBackground)) // Light gray background for content area
             }
         }
         .background(
@@ -359,7 +380,6 @@ struct ContentView: View {
         refreshID = UUID()
     }
     
-    // Enhanced request creation handler with profile update
     private func handleRequestCreated() {
         print("📝 Request created callback triggered")
         
@@ -384,7 +404,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: - Authentication
+    // Authentication
     
     // Enhanced sign-in handler
     func handleSignInButton() {
@@ -462,22 +482,22 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Supporting Views
+// Supporting Views
 
-// Feature card component
+// Feature card component - more compact version
 struct FeatureCard: View {
     let icon: String
     let title: String
     let description: String
     
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.largeTitle)
+                .font(.title2)
                 .foregroundColor(.blue)
             
             Text(title)
-                .font(.headline)
+                .font(.subheadline)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
             
@@ -485,9 +505,11 @@ struct FeatureCard: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+                .lineLimit(2)
         }
-        .padding()
-        .frame(maxWidth: .infinity, minHeight: 120)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, minHeight: 100) 
         .background(Color.white)
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.1), radius: 4)

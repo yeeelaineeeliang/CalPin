@@ -2,8 +2,6 @@
 //  CalPinApp.swift
 //  CalPin
 //
-//  Final Google Sign-In configuration using GoogleService-Info.plist
-//
 
 import SwiftUI
 import GoogleSignIn
@@ -20,12 +18,12 @@ struct CalPinApp: App {
             fatalError("GoogleService-Info.plist file not found or CLIENT_ID missing")
         }
         
-        print("✅ Configuring Google Sign-In with client ID from plist: \(clientId)")
+        print("Configuring Google Sign-In with client ID from plist: \(clientId)")
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientId)
         
         // Optional: Print the reversed client ID for URL scheme verification
         if let reversedClientId = plist["REVERSED_CLIENT_ID"] as? String {
-            print("🔗 URL Scheme should be: \(reversedClientId)")
+            print("URL Scheme should be: \(reversedClientId)")
         }
     }
     
@@ -33,16 +31,16 @@ struct CalPinApp: App {
         WindowGroup {
             ContentView()
                 .onOpenURL { url in
-                    print("📱 Received URL: \(url)")
+                    print("Received URL: \(url)")
                     let handled = GIDSignIn.sharedInstance.handle(url)
-                    print("🔄 URL handled by Google Sign-In: \(handled)")
+                    print("URL handled by Google Sign-In: \(handled)")
                 }
                 .onAppear {
                     // Check if user is already signed in
                     if let user = GIDSignIn.sharedInstance.currentUser {
-                        print("👤 User already signed in: \(user.profile?.email ?? "Unknown")")
+                        print("User already signed in: \(user.profile?.email ?? "Unknown")")
                     } else {
-                        print("👤 No user currently signed in")
+                        print("No user currently signed in")
                     }
                 }
         }

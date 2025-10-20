@@ -2,8 +2,6 @@
 //  DraggableCardView.swift
 //  CalPin
 //
-//  Updated draggable card that passes token to CardView
-//
 
 import SwiftUI
 import MapKit
@@ -13,7 +11,7 @@ struct DraggableCardView: View {
     let places: [Place]
     @Binding var offset: CGFloat
     @Binding var isDragging: Bool
-    let userToken: String // Add token parameter
+    let userToken: String 
     
     // Card position states
     private let minOffset: CGFloat = 100   // Minimized card height

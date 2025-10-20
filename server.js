@@ -1,17 +1,15 @@
-// server.js - Enhanced CalPin Backend with Helper Status Tracking
 const express = require('express');
 const cors = require('cors');
 const { OAuth2Client } = require('google-auth-library');
 const { initDatabase, db } = require('./database');
 require('dotenv').config();
+const aiService = require('./ai-service');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Google OAuth client for token verification
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Enhanced CORS configuration
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -20,10 +18,10 @@ app.use(cors({
 
 // Debug middleware to log incoming requests
 app.use((req, res, next) => {
-  console.log(`\n🔍 [${new Date().toISOString()}] ${req.method} ${req.url}`);
-  console.log('📋 Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('🔗 Content-Type:', req.get('Content-Type'));
-  console.log('🔐 Authorization:', req.get('Authorization') ? 'Bearer ' + req.get('Authorization').substring(7, 20) + '...' : 'None');
+  console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Content-Type:', req.get('Content-Type'));
+  console.log('Authorization:', req.get('Authorization') ? 'Bearer ' + req.get('Authorization').substring(7, 20) + '...' : 'None');
   next();
 });
 
@@ -40,10 +38,10 @@ app.use(express.urlencoded({
 // Debug middleware to log parsed body
 app.use((req, res, next) => {
   if (req.method === 'POST' || req.method === 'PUT') {
-    console.log('📦 Raw Body Length:', req.get('Content-Length') || 'Unknown');
-    console.log('📦 Parsed Body:', JSON.stringify(req.body, null, 2));
-    console.log('📦 Body Type:', typeof req.body);
-    console.log('📦 Body Keys:', Object.keys(req.body || {}));
+    console.log('  Raw Body Length:', req.get('Content-Length') || 'Unknown');
+    console.log('  Parsed Body:', JSON.stringify(req.body, null, 2));
+    console.log('  Body Type:', typeof req.body);
+    console.log('  Body Keys:', Object.keys(req.body || {}));
   }
   next();
 });
@@ -57,24 +55,24 @@ let databaseConnected = false;
 // Initialize database on startup - clean version without sample data
 async function startServer() {
   try {
-    console.log('🗄️ Initializing database...');
+    console.log('Initializing database...');
     await initDatabase();
     databaseConnected = true;
-    console.log('✅ Database connected successfully!');
+    console.log('  Database connected successfully!');
     
     // Test database connection
     try {
       const existingRequests = await db.getActiveRequests();
-      console.log(`✅ Database test successful, found ${existingRequests.length} existing requests`);
+      console.log(`Database test successful, found ${existingRequests.length} existing requests`);
       console.log('🎯 Ready to accept new requests from users');
     } catch (testError) {
-      console.log('⚠️ Database test failed:', testError.message);
+      console.log('Database test failed:', testError.message);
       databaseConnected = false;
     }
     
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
-    console.log('⚠️ Falling back to in-memory storage');
+    console.error('  Database connection failed:', error.message);
+    console.log('Falling back to in-memory storage');
     databaseConnected = false;
   }
 }
@@ -82,9 +80,9 @@ async function startServer() {
 // Utility function to verify Google token
 async function verifyGoogleToken(token) {
   try {
-    console.log('🔍 Verifying Google token...');
-    console.log('🔍 Token length:', token.length);
-    console.log('🔍 Token starts with:', token.substring(0, 50) + '...');
+    console.log('Verifying Google token...');
+    console.log('Token length:', token.length);
+    console.log('Token starts with:', token.substring(0, 50) + '...');
     
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -106,14 +104,14 @@ async function verifyGoogleToken(token) {
       throw new Error('Must use Berkeley email');
     }
     
-    console.log('✅ Token verified for:', payload.email);
+    console.log('  Token verified for:', payload.email);
     return {
       id: payload.sub,
       email: payload.email,
       name: payload.name
     };
   } catch (error) {
-    console.log('❌ Token verification failed:', error.message);
+    console.log('  Token verification failed:', error.message);
     throw new Error('Invalid token');
   }
 }
@@ -123,12 +121,12 @@ async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.replace('Bearer ', '');
 
-  console.log('🔍 Auth check - Header present:', !!authHeader);
-  console.log('🔍 Auth check - Token extracted:', !!token);
-  console.log('🔍 Auth check - Token length:', token ? token.length : 0);
+  console.log('Auth check - Header present:', !!authHeader);
+  console.log('Auth check - Token extracted:', !!token);
+  console.log('Auth check - Token length:', token ? token.length : 0);
 
   if (!token) {
-    console.log('❌ No token provided');
+    console.log('  No token provided');
     return res.status(401).json({ error: 'Access token required' });
   }
 
@@ -143,17 +141,17 @@ async function authenticateToken(req, res, next) {
           email: user.email, 
           name: user.name
         });
-        console.log('✅ User upserted in database:', user.email);
+        console.log('User upserted in database:', user.email);
       } catch (dbError) {
-        console.log('⚠️ Could not upsert user in database:', dbError.message);
+        console.log('Could not upsert user in database:', dbError.message);
       }
     }
     
     req.user = user;
-    console.log('✅ User authenticated:', user.email);
+    console.log('  User authenticated:', user.email);
     next();
   } catch (error) {
-    console.error('❌ Auth error:', error.message);
+    console.error('  Auth error:', error.message);
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 }
@@ -174,7 +172,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 // Enhanced health check
 app.get('/health', async (req, res) => {
-  console.log('🏥 Health check requested');
+  console.log('Health check requested');
   
   let requestCount = 0;
   let dbStatus = 'disconnected';
@@ -192,12 +190,12 @@ app.get('/health', async (req, res) => {
         const userResult = await db.pool.query('SELECT COUNT(*) FROM users');
         userCount = parseInt(userResult.rows[0].count);
       } catch (userError) {
-        console.log('⚠️ Could not get user count:', userError.message);
+        console.log('  Could not get user count:', userError.message);
       }
       
-      console.log('✅ Database health check passed');
+      console.log('  Database health check passed');
     } catch (error) {
-      console.log('⚠️ Database health check failed:', error.message);
+      console.log('  Database health check failed:', error.message);
       requestCount = fallbackRequests.length;
       dbStatus = 'error';
       dbError = error.message;
@@ -222,17 +220,17 @@ app.get('/health', async (req, res) => {
 // GET /api/fetch - Retrieve all help requests WITH HELPER STATUS
 app.get('/api/fetch', authenticateToken, async (req, res) => {
   try {
-    console.log('📥 Fetching requests for user:', req.user.email);
+    console.log('Fetching requests for user:', req.user.email);
     
     let activeRequests = [];
     
     if (databaseConnected) {
       try {
-        console.log('🗄️ Fetching from database...');
+        console.log('Fetching from database...');
         activeRequests = await db.getActiveRequests();
-        console.log(`✅ Found ${activeRequests.length} requests in database`);
+        console.log(`Found ${activeRequests.length} requests in database`);
         
-        // 🔥 NEW: Check which requests the current user is helping with
+        // Check which requests the current user is helping with
         const userId = req.user.id;
         if (activeRequests.length > 0) {
           const helpCheckQuery = `
@@ -245,7 +243,7 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
           const helpResult = await db.pool.query(helpCheckQuery, [userId, requestIds]);
           const helpingRequestIds = new Set(helpResult.rows.map(row => row.request_id.toString()));
           
-          console.log(`🔍 User ${userId} is helping with requests:`, Array.from(helpingRequestIds));
+          console.log(`User ${userId} is helping with requests:`, Array.from(helpingRequestIds));
           
           // Add helping status to each request
           activeRequests = activeRequests.map(request => ({
@@ -255,8 +253,8 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }
         
       } catch (dbError) {
-        console.log('❌ Database fetch failed:', dbError.message);
-        console.log('⚠️ Falling back to in-memory storage');
+        console.log('  Database fetch failed:', dbError.message);
+        console.log('Falling back to in-memory storage');
         const now = new Date();
         activeRequests = fallbackRequests.filter(request => {
           const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -267,7 +265,7 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }));
       }
     } else {
-      console.log('⚠️ Using fallback in-memory storage');
+      console.log(' Using fallback in-memory storage');
       const now = new Date();
       activeRequests = fallbackRequests.filter(request => {
         const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -285,7 +283,7 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
     let responseRequests = activeRequests;
     
     if (userLat && userLon) {
-      console.log('📍 Calculating distances from user location:', { userLat, userLon });
+      console.log(' Calculating distances from user location:', { userLat, userLon });
       responseRequests = activeRequests.map(request => ({
         ...request,
         distance: calculateDistance(userLat, userLon, request.latitude, request.longitude).toFixed(1) + 'mi',
@@ -299,21 +297,21 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
       }));
     }
 
-    console.log('✅ Returning', responseRequests.length, 'active requests with helper status');
+    console.log('Returning', responseRequests.length, 'active requests with helper status');
     res.json(responseRequests);
   } catch (error) {
-    console.error('❌ Fetch error:', error);
+    console.error('  Fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch requests' });
   }
 });
 
-// 🔥 NEW: GET /api/requests/:id/helper-status - Check if current user is helping
+// Check if current user is helping
 app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) => {
   try {
     const requestId = req.params.id;
     const userId = req.user.id;
 
-    console.log('🔍 Checking helper status - Request ID:', requestId, 'User:', req.user.email);
+    console.log(' Checking helper status - Request ID:', requestId, 'User:', req.user.email);
 
     if (databaseConnected) {
       try {
@@ -324,7 +322,7 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
         );
         
         const isHelping = result.rows.length > 0;
-        console.log(`✅ Helper status check: User ${userId} is ${isHelping ? 'helping' : 'not helping'} with request ${requestId}`);
+        console.log(`  Helper status check: User ${userId} is ${isHelping ? 'helping' : 'not helping'} with request ${requestId}`);
         
         res.json({
           isHelping: isHelping,
@@ -332,12 +330,10 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
         });
         return;
       } catch (dbError) {
-        console.log('❌ Database helper status check failed:', dbError.message);
-        // Fall through to in-memory check
+        console.log('  Database helper status check failed:', dbError.message);
       }
     }
 
-    // Fallback to in-memory storage
     const request = fallbackRequests.find(r => r.id === requestId);
     if (!request) {
       return res.status(404).json({ error: 'Request not found' });
@@ -350,7 +346,7 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
     });
 
   } catch (error) {
-    console.error('❌ Helper status check error:', error);
+    console.error('  Helper status check error:', error);
     res.status(500).json({ error: 'Failed to check helper status' });
   }
 });
@@ -360,7 +356,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
   try {
     console.log('\n🔧 === CREATE REQUEST DEBUG ===');
     console.log('🔨 Request received from:', req.user.email);
-    console.log('📦 Body received:', JSON.stringify(req.body, null, 2));
+    console.log('  Body received:', JSON.stringify(req.body, null, 2));
     
     // Handle both direct object and nested object structures
     let requestData = req.body;
@@ -368,12 +364,12 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
       const firstKey = Object.keys(req.body)[0];
       if (typeof req.body[firstKey] === 'object') {
-        console.log('📦 Detected wrapped data, unwrapping...');
+        console.log(' Detected wrapped data, unwrapping...');
         requestData = req.body[firstKey];
       }
     }
     
-    console.log('📦 Final request data:', JSON.stringify(requestData, null, 2));
+    console.log(' Final request data:', JSON.stringify(requestData, null, 2));
     
     const {
       caption: title,
@@ -385,7 +381,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       longitude
     } = requestData;
 
-    console.log('📋 Extracted fields:');
+    console.log(' Extracted fields:');
     console.log('  - title:', title);
     console.log('  - description:', description);
     console.log('  - address:', address);
@@ -397,7 +393,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
 
     // Validation
     if (!title || !description || !address || !contact) {
-      console.log('❌ Validation failed - missing required fields');
+      console.log('  Validation failed - missing required fields');
       return res.status(400).json({ 
         error: 'Missing required fields: title, description, address, contact',
         received: { title: !!title, description: !!description, address: !!address, contact: !!contact }
@@ -405,7 +401,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     }
 
     if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
-      console.log('❌ Validation failed - invalid coordinates');
+      console.log('  Validation failed - invalid coordinates');
       return res.status(400).json({ 
         error: 'Invalid location coordinates',
         received: { latitude, longitude }
@@ -414,7 +410,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
 
     const validUrgencyLevels = ['Low', 'Medium', 'High', 'Urgent'];
     if (!validUrgencyLevels.includes(urgencyLevel)) {
-      console.log('❌ Validation failed - invalid urgency level');
+      console.log('  Validation failed - invalid urgency level');
       return res.status(400).json({ 
         error: 'Invalid urgency level. Must be: Low, Medium, High, or Urgent',
         received: urgencyLevel
@@ -425,8 +421,8 @@ app.post('/api/create', authenticateToken, async (req, res) => {
 
     if (databaseConnected) {
       try {
-        console.log('🗄️ Creating request in database...');
-        console.log('👤 User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
+        console.log(' Creating request in database...');
+        console.log(' User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
         
         newRequest = await db.createRequest({
           title,
@@ -438,24 +434,24 @@ app.post('/api/create', authenticateToken, async (req, res) => {
           authorId: req.user.id,
           authorName: req.user.name
         });
-        console.log('✅ Request created in database with ID:', newRequest.id);
+        console.log('  Request created in database with ID:', newRequest.id);
         
         // Verify the request was saved
         try {
           const verifyRequests = await db.getActiveRequests();
           const foundRequest = verifyRequests.find(r => r.id.toString() === newRequest.id.toString());
           if (foundRequest) {
-            console.log('✅ Request verified in database');
+            console.log('Request verified in database');
           } else {
-            console.log('⚠️ Request not found in verification check');
+            console.log('Request not found in verification check');
           }
         } catch (verifyError) {
-          console.log('⚠️ Could not verify request creation:', verifyError.message);
+          console.log(' Could not verify request creation:', verifyError.message);
         }
         
       } catch (dbError) {
-        console.log('❌ Database create failed:', dbError.message);
-        console.log('⚠️ Falling back to in-memory storage');
+        console.log('  Database create failed:', dbError.message);
+        console.log(' Falling back to in-memory storage');
         
         newRequest = {
           id: Date.now().toString(),
@@ -477,7 +473,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
         databaseConnected = false;
       }
     } else {
-      console.log('⚠️ Using fallback in-memory storage');
+      console.log('  Using fallback in-memory storage');
       newRequest = {
         id: Date.now().toString(),
         title,
@@ -497,9 +493,9 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       fallbackRequests.push(newRequest);
     }
 
-    console.log('✅ Request created successfully with ID:', newRequest.id);
-    console.log('📊 Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
-    console.log('🔧 === END CREATE REQUEST DEBUG ===\n');
+    console.log(' Request created successfully with ID:', newRequest.id);
+    console.log('Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
+    console.log(' === END CREATE REQUEST DEBUG ===\n');
 
     res.status(201).json({
       message: 'Request created successfully',
@@ -508,8 +504,8 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Create error:', error);
-    console.error('❌ Error stack:', error.stack);
+    console.error('  Create error:', error);
+    console.error('  Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to create request',
       details: error.message 
@@ -524,12 +520,12 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     const userId = req.user.id;
     const userName = req.user.name;
 
-    console.log('🤝 User offering help:', req.user.email, 'for request:', requestId);
+    console.log(' User offering help:', req.user.email, 'for request:', requestId);
 
     if (databaseConnected) {
       try {
         const result = await db.offerHelp(requestId, userId, userName);
-        console.log('✅ Help offered successfully in database');
+        console.log('  Help offered successfully in database');
         res.json({ 
           success: true, 
           message: 'Help offered successfully',
@@ -541,12 +537,10 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
         if (dbError.message && dbError.message.includes('duplicate key')) {
           return res.status(400).json({ error: 'You are already helping with this request' });
         }
-        console.log('❌ Database offer help failed:', dbError.message);
-        // Fall through to in-memory storage
+        console.log('  Database offer help failed:', dbError.message);
       }
     }
 
-    // Fallback to in-memory storage
     const requestIndex = fallbackRequests.findIndex(r => r.id === requestId);
     if (requestIndex === -1) {
       return res.status(404).json({ error: 'Request not found' });
@@ -575,7 +569,7 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     
     request.updatedAt = new Date();
     
-    console.log('⚠️ Help offered using fallback storage');
+    console.log('Help offered using fallback storage');
     res.json({ 
       success: true, 
       message: 'Help offered successfully',
@@ -584,19 +578,18 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     });
 
   } catch (error) {
-    console.error('❌ Offer help error:', error);
+    console.error('  Offer help error:', error);
     res.status(500).json({ error: 'Failed to offer help' });
   }
 });
-// Add this endpoint to your server.js file
-// 🔥 NEW: Helper marks their help as complete
+// Helper marks their help as complete
 app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) => {
   try {
     const requestId = req.params.id;
     const helperId = req.user.id;
     const helperName = req.user.name;
 
-    console.log('✅ Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
+    console.log('  Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
 
     if (databaseConnected) {
       try {
@@ -647,7 +640,6 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
           const request = requestResult.rows[0];
           
           // If no more active helpers, mark request as completed
-          // (You can change this logic based on your workflow preference)
           if (activeHelpersCount === 0) {
             await client.query(
               `UPDATE help_requests 
@@ -659,7 +651,7 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
           
           await client.query('COMMIT');
           
-          console.log(`✅ Helper ${helperId} marked help as complete for request ${requestId}`);
+          console.log(`  Helper ${helperId} marked help as complete for request ${requestId}`);
           
           res.json({
             success: true,
@@ -676,7 +668,7 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
         }
         
       } catch (dbError) {
-        console.log('❌ Database complete help failed:', dbError.message);
+        console.log('  Database complete help failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -716,12 +708,12 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
     }
 
   } catch (error) {
-    console.error('❌ Complete help error:', error);
+    console.error('  Complete help error:', error);
     res.status(500).json({ error: 'Failed to complete help' });
   }
 });
 
-// 🔥 OPTIONAL: Also add this endpoint for requester confirmation workflow
+// for requester confirmation workflow
 app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, res) => {
   try {
     const requestId = req.params.id;
@@ -776,7 +768,7 @@ app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, 
         }
         
       } catch (dbError) {
-        console.log('❌ Database confirm completion failed:', dbError.message);
+        console.log('  Database confirm completion failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -802,12 +794,12 @@ app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, 
     }
 
   } catch (error) {
-    console.error('❌ Confirm completion error:', error);
+    console.error('  Confirm completion error:', error);
     res.status(500).json({ error: 'Failed to confirm completion' });
   }
 });
 
-// 🔥 NEW: PUT /api/requests/:id/status - Update request status
+//  Update request status
 app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
   try {
     const requestId = req.params.id;
@@ -827,7 +819,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
           return res.status(404).json({ error: 'Request not found or unauthorized' });
         }
         
-        console.log('✅ Request status updated in database');
+        console.log('  Request status updated in database');
         res.json({ 
           success: true, 
           message: 'Status updated successfully',
@@ -836,12 +828,10 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
         });
         return;
       } catch (dbError) {
-        console.log('❌ Database status update failed:', dbError.message);
-        // Fall through to in-memory storage
+        console.log('  Database status update failed:', dbError.message);
       }
     }
 
-    // Fallback to in-memory storage
     const requestIndex = fallbackRequests.findIndex(r => r.id === requestId && r.authorId === userId);
     if (requestIndex === -1) {
       return res.status(404).json({ error: 'Request not found or unauthorized' });
@@ -850,7 +840,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     fallbackRequests[requestIndex].status = status;
     fallbackRequests[requestIndex].updatedAt = new Date();
     
-    console.log('⚠️ Request status updated using fallback storage');
+    console.log('  Request status updated using fallback storage');
     res.json({ 
       success: true, 
       message: 'Status updated successfully',
@@ -859,14 +849,12 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Update status error:', error);
+    console.error('  Update status error:', error);
     res.status(500).json({ error: 'Failed to update status' });
   }
 });
 
-// 🔥 NEW: GET /api/user/stats - User statistics
-// Enhanced user stats implementation for server.js
-// Replace the existing /api/user/stats endpoint
+//  User statistics
 app.get('/api/user/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1049,14 +1037,14 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 
           stats.totalConnectionsMade = parseInt(connectionsResult.rows[0].total_connections) || 0;
 
-          console.log('✅ Dynamic stats calculated successfully:', stats);
+          console.log('  Dynamic stats calculated successfully:', stats);
           
         } finally {
           client.release();
         }
         
       } catch (dbError) {
-        console.log('❌ Database stats calculation failed:', dbError.message);
+        console.log('  Database stats calculation failed:', dbError.message);
         // Return default stats if database fails
         stats = {
           requestsMade: 0,
@@ -1072,7 +1060,7 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
         };
       }
     } else {
-      // Fallback calculation using in-memory data
+
       const userRequests = fallbackRequests.filter(r => r.authorId === userId);
       const userHelps = fallbackRequests.filter(r => 
         r.helpers && r.helpers.includes(userId) ||
@@ -1091,16 +1079,16 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 
     res.json(stats);
   } catch (error) {
-    console.error('❌ User stats error:', error);
+    console.error('  User stats error:', error);
     res.status(500).json({ error: 'Failed to get user stats' });
   }
 });
 
-// 🔥 NEW: GET /api/user/achievements - Get user achievements
+// Get user achievements
 app.get('/api/user/achievements', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('🏆 Fetching achievements for user:', req.user.email);
+    console.log('Fetching achievements for user:', req.user.email);
 
     let achievements = [];
 
@@ -1217,25 +1205,25 @@ app.get('/api/user/achievements', authenticateToken, async (req, res) => {
         achievements = achievementCriteria;
 
       } catch (error) {
-        console.log('❌ Achievement calculation failed:', error.message);
+        console.log('  Achievement calculation failed:', error.message);
       }
     }
 
-    console.log(`✅ Returning ${achievements.length} achievements`);
+    console.log(`  Returning ${achievements.length} achievements`);
     res.json(achievements);
   } catch (error) {
-    console.error('❌ Achievements error:', error);
+    console.error('  Achievements error:', error);
     res.status(500).json({ error: 'Failed to get achievements' });
   }
 });
 
-// 🔥 NEW: GET /api/user/activity-timeline - Get user activity timeline
+// Get user activity timeline
 app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const limit = parseInt(req.query.limit) || 20;
     
-    console.log('📅 Fetching activity timeline for user:', req.user.email);
+    console.log('Fetching activity timeline for user:', req.user.email);
 
     let timeline = [];
 
@@ -1281,16 +1269,16 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
           statusChange: row.status_change
         }));
 
-        console.log(`✅ Activity timeline: ${timeline.length} items`);
+        console.log(`  Activity timeline: ${timeline.length} items`);
 
       } catch (dbError) {
-        console.log('❌ Timeline query failed:', dbError.message);
+        console.log('  Timeline query failed:', dbError.message);
       }
     }
 
     res.json(timeline);
   } catch (error) {
-    console.error('❌ Activity timeline error:', error);
+    console.error('  Activity timeline error:', error);
     res.status(500).json({ error: 'Failed to get activity timeline' });
   }
 });
@@ -1367,7 +1355,7 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
         });
         
       } catch (dbError) {
-        console.log('❌ Database history fetch failed:', dbError.message);
+        console.log('  Database history fetch failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -1389,18 +1377,18 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
     }
 
   } catch (error) {
-    console.error('❌ History fetch error:', error);
+    console.error('History fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch history' });
   }
 });
 
 // Test endpoint for debugging
 app.post('/api/test', (req, res) => {
-  console.log('\n🧪 === TEST ENDPOINT ===');
-  console.log('📦 Headers:', req.headers);
-  console.log('📦 Body:', req.body);
-  console.log('📦 Raw body type:', typeof req.body);
-  console.log('🧪 === END TEST ===\n');
+  console.log('\n  === TEST ENDPOINT ===');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
+  console.log('Raw body type:', typeof req.body);
+  console.log('=== END TEST ===\n');
   
   res.json({
     message: 'Test endpoint reached',
@@ -1438,7 +1426,7 @@ app.get('/api/debug/database', authenticateToken, async (req, res) => {
   res.json(diagnostics);
 });
 
-// 🔥 NEW: Debug endpoint to check database state
+// Debug endpoint to check database state
 app.get('/api/debug/requests', authenticateToken, async (req, res) => {
   try {
     console.log('🔧 Debug endpoint called by:', req.user.email);
@@ -1524,7 +1512,7 @@ app.get('/api/debug/requests', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Debug endpoint error:', error);
+    console.error('  Debug endpoint error:', error);
     res.status(500).json({ 
       error: 'Debug failed',
       message: error.message,
@@ -1533,10 +1521,10 @@ app.get('/api/debug/requests', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 NEW: Simplified test endpoint to check basic functionality
+// Simplified test endpoint to check basic functionality
 app.get('/api/test-fetch', authenticateToken, async (req, res) => {
   try {
-    console.log('🧪 Test fetch called');
+    console.log('  Test fetch called');
     
     if (databaseConnected) {
       // Simple direct query without complex joins
@@ -1548,7 +1536,7 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
         LIMIT 5
       `);
       
-      console.log(`🧪 Direct query returned ${result.rows.length} rows`);
+      console.log(`  Direct query returned ${result.rows.length} rows`);
       
       const simpleMapped = result.rows.map(row => ({
         id: row.id.toString(),
@@ -1573,15 +1561,377 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
     }
     
   } catch (error) {
-    console.error('❌ Test fetch error:', error);
+    console.error('  Test fetch error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// AI analysis
+app.post('/api/create', authenticateToken, async (req, res) => {
+  try {
+    console.log('\n=== CREATE REQUEST WITH AI DEBUG ===');
+    console.log('Request received from:', req.user.email);
+    
+    let requestData = req.body;
+    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
+      const firstKey = Object.keys(req.body)[0];
+      if (typeof req.body[firstKey] === 'object') {
+        requestData = req.body[firstKey];
+      }
+    }
+    
+    const {
+      caption: title,
+      description,
+      address,
+      contact,
+      urgencyLevel = 'Medium',
+      latitude,
+      longitude
+    } = requestData;
+
+    // Validation
+    if (!title || !description || !address || !contact) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: title, description, address, contact'
+      });
+    }
+
+    // AI ANALYSIS - Categorize and analyze the request
+    console.log('Running AI analysis on request...');
+    const aiAnalysis = await aiService.categorizeRequest(title, description, urgencyLevel);
+    
+    // Check safety
+    if (aiAnalysis.safetyCheck === 'flagged') {
+      console.log('Request flagged by AI:', aiAnalysis.safetyReason);
+      return res.status(400).json({
+        error: 'Request could not be created',
+        reason: 'Content does not meet community guidelines',
+        details: aiAnalysis.safetyReason
+      });
+    }
+
+    if (databaseConnected) {
+      try {
+        const statsResult = await db.pool.query(`
+          SELECT 
+            COUNT(DISTINCT hr.id) as request_count,
+            COUNT(DISTINCT ho.request_id) as help_count
+          FROM users u
+          LEFT JOIN help_requests hr ON hr.author_id = u.id  
+          LEFT JOIN help_offers ho ON ho.helper_id = u.id
+          WHERE u.id = $1
+        `, [req.user.id]);
+        
+        if (statsResult.rows.length > 0) {
+          userStats.requestCount = parseInt(statsResult.rows[0].request_count) || 0;
+          userStats.helpCount = parseInt(statsResult.rows[0].help_count) || 0;
+        }
+      } catch (err) {
+        console.log('Could not fetch user stats for chat context');
+      }
+    }
+
+    const context = {
+      userName: req.user.name,
+      helpCount: userStats.helpCount,
+      requestCount: userStats.requestCount
+    };
+
+    const response = await aiService.chatAssistant(message, context);
+
+    // Save chat interaction
+    if (databaseConnected) {
+      try {
+        await db.saveChatInteraction(req.user.id, message, response, context);
+      } catch (err) {
+        console.log('Could not save chat interaction');
+      }
+    }
+
+    res.json({
+      message: response,
+      context: {
+        userName: req.user.name,
+        yourHelpCount: userStats.helpCount
+      }
+    });
+
+  } catch (error) {
+    console.error('AI chat error:', error);
+    res.status(500).json({ 
+      error: 'AI assistant temporarily unavailable',
+      message: "I'm having trouble connecting right now. Try again in a moment!"
+    });
+  }
+});
+
+// Get recent chat history
+app.get('/api/ai/chat-history', authenticateToken, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    
+    if (!databaseConnected) {
+      return res.json([]);
+    }
+
+    const history = await db.getChatHistory(req.user.id, limit);
+    
+    res.json(history.map(h => ({
+      message: h.message,
+      response: h.response,
+      timestamp: h.created_at
+    })));
+
+  } catch (error) {
+    console.error('Chat history error:', error);
+    res.status(500).json({ error: 'Failed to get chat history' });
+  }
+});
+
+// Detect duplicate requests
+app.post('/api/ai/detect-duplicates', authenticateToken, async (req, res) => {
+  try {
+    console.log('Detecting duplicates for user:', req.user.email);
+
+    let requests = [];
+    if (databaseConnected) {
+      const result = await db.pool.query(`
+        SELECT id, title, description, ai_category, created_at
+        FROM help_requests
+        WHERE status = 'Open' 
+          AND created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC
+        LIMIT 50
+      `);
+      requests = result.rows;
+    } else {
+      requests = fallbackRequests.filter(r => r.status === 'Open');
+    }
+
+    if (requests.length < 2) {
+      return res.json({ duplicates: [] });
+    }
+
+    const duplicates = await aiService.detectDuplicates(requests);
+    
+    res.json({ 
+      duplicates,
+      analyzed: requests.length 
+    });
+
+  } catch (error) {
+    console.error('❌ Duplicate detection error:', error);
+    res.status(500).json({ error: 'Failed to detect duplicates' });
+  }
+});
+
+// Get AI-generated weekly summary
+app.get('/api/ai/weekly-summary', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log('📊 Generating weekly summary for:', req.user.email);
+
+    let stats = { thisWeek: 0, communityPoints: 0, streak: 0 };
+    let activities = [];
+
+    if (databaseConnected) {
+      try {
+        const statsResult = await db.pool.query(`
+          SELECT 
+            COUNT(DISTINCT ho.request_id) as this_week,
+            COUNT(DISTINCT ho.request_id) * 10 as community_points
+          FROM help_offers ho
+          WHERE ho.helper_id = $1 
+            AND ho.created_at >= NOW() - INTERVAL '7 days'
+        `, [userId]);
+        
+        if (statsResult.rows.length > 0) {
+          stats.thisWeek = parseInt(statsResult.rows[0].this_week) || 0;
+          stats.communityPoints = parseInt(statsResult.rows[0].community_points) || 0;
+        }
+
+        const activityResult = await db.pool.query(`
+          SELECT 
+            'help_offered' as activity_type,
+            hr.title as request_title,
+            ho.created_at as timestamp
+          FROM help_offers ho
+          JOIN help_requests hr ON ho.request_id = hr.id
+          WHERE ho.helper_id = $1
+            AND ho.created_at >= NOW() - INTERVAL '7 days'
+          ORDER BY ho.created_at DESC
+          LIMIT 10
+        `, [userId]);
+        
+        activities = activityResult.rows;
+
+      } catch (err) {
+        console.log('⚠️ Could not fetch weekly stats');
+      }
+    }
+
+    const summary = await aiService.generateWeeklySummary(stats, activities);
+
+    res.json({
+      summary,
+      stats,
+      activitiesCount: activities.length
+    });
+
+  } catch (error) {
+    console.error('Weekly summary error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate summary',
+      summary: `You've made an impact this week! Keep helping fellow Bears! 🐻💙`
+    });
+  }
+});
+
+// Get user AI preferences
+app.get('/api/ai/preferences', authenticateToken, async (req, res) => {
+  try {
+    if (!databaseConnected) {
+      return res.json({
+        enableAISuggestions: true,
+        enableSmartNotifications: true,
+        preferredCategories: [],
+        notificationRadius: 2.0
+      });
+    }
+
+    const prefs = await db.getUserAIPreferences(req.user.id);
+    
+    res.json({
+      enableAISuggestions: prefs?.enable_ai_suggestions ?? true,
+      enableSmartNotifications: prefs?.enable_smart_notifications ?? true,
+      preferredCategories: prefs?.preferred_categories || [],
+      notificationRadius: parseFloat(prefs?.notification_radius_miles) || 2.0
+    });
+
+  } catch (error) {
+    console.error('Get AI preferences error:', error);
+    res.status(500).json({ error: 'Failed to get preferences' });
+  }
+});
+
+//  Update user AI preferences
+app.put('/api/ai/preferences', authenticateToken, async (req, res) => {
+  try {
+    const { enableAISuggestions, enableSmartNotifications, preferredCategories, notificationRadius } = req.body;
+    
+    if (!databaseConnected) {
+      return res.json({ message: 'Preferences saved (in-memory only)' });
+    }
+
+    await db.updateUserAIPreferences(req.user.id, {
+      enableAISuggestions,
+      enableSmartNotifications,
+      preferredCategories,
+      notificationRadius
+    });
+
+    res.json({ 
+      message: 'AI preferences updated successfully',
+      preferences: {
+        enableAISuggestions,
+        enableSmartNotifications,
+        preferredCategories,
+        notificationRadius
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Update AI preferences error:', error);
+    res.status(500).json({ error: 'Failed to update preferences' });
+  }
+});
+
+// Filter requests by AI category
+app.get('/api/requests/by-category/:category', authenticateToken, async (req, res) => {
+  try {
+    const { category } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`Fetching ${category} requests for:`, req.user.email);
+
+    if (!databaseConnected) {
+      const filtered = fallbackRequests.filter(r => 
+        r.status === 'Open' && r.aiCategory === category
+      );
+      return res.json(filtered);
+    }
+
+    const result = await db.pool.query(`
+      SELECT r.*, 
+        COALESCE(h.helpers_count, 0) as helpers_count,
+        EXISTS(SELECT 1 FROM help_offers WHERE request_id = r.id AND helper_id = $2) as is_current_user_helping
+      FROM help_requests r
+      LEFT JOIN (
+        SELECT request_id, COUNT(*) as helpers_count
+        FROM help_offers
+        GROUP BY request_id
+      ) h ON r.id = h.request_id
+      WHERE r.ai_category = $1
+        AND r.status = 'Open'
+        AND r.ai_safety_check = 'safe'
+        AND r.created_at > NOW() - INTERVAL '24 hours'
+      ORDER BY r.created_at DESC
+    `, [category, userId]);
+
+    res.json(result.rows);
+
+  } catch (error) {
+    console.error('❌ Category filter error:', error);
+    res.status(500).json({ error: 'Failed to filter by category' });
+  }
+});
+
+// Get all available categories with counts
+app.get('/api/ai/categories', authenticateToken, async (req, res) => {
+  try {
+    if (!databaseConnected) {
+      return res.json(aiService.categories.map(c => ({
+        id: c.id,
+        name: c.name,
+        icon: c.icon,
+        count: 0
+      })));
+    }
+
+    const result = await db.pool.query(`
+      SELECT 
+        ai_category,
+        ai_category_name,
+        ai_category_icon,
+        COUNT(*) as count
+      FROM help_requests
+      WHERE status = 'Open'
+        AND ai_safety_check = 'safe'
+        AND created_at > NOW() - INTERVAL '24 hours'
+      GROUP BY ai_category, ai_category_name, ai_category_icon
+      ORDER BY count DESC
+    `);
+
+    const categories = result.rows.map(row => ({
+      id: row.ai_category,
+      name: row.ai_category_name,
+      icon: row.ai_category_icon,
+      count: parseInt(row.count)
+    }));
+
+    res.json(categories);
+
+  } catch (error) {
+    console.error('Categories error:', error);
+    res.status(500).json({ error: 'Failed to get categories' });
   }
 });
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('🚨 Server error:', error);
-  console.error('🚨 Stack trace:', error.stack);
+  console.error('Server error:', error);
+  console.error('Stack trace:', error.stack);
   res.status(500).json({ 
     error: 'Internal server error',
     message: error.message,
@@ -1591,7 +1941,7 @@ app.use((error, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  console.log('❓ 404 - Endpoint not found:', req.method, req.url);
+  console.log('404 - Endpoint not found:', req.method, req.url);
   res.status(404).json({ 
     error: 'Endpoint not found',
     method: req.method,
@@ -1602,11 +1952,11 @@ app.use((req, res) => {
 // Start server with database initialization
 startServer().then(() => {
   app.listen(PORT, () => {
-    console.log(`🚀 CalPin Backend running on port ${PORT}`);
-    console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-    console.log(`🧪 Test endpoint: http://localhost:${PORT}/api/test`);
-    console.log(`🔐 Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
-    console.log(`🗄️ Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
-    console.log(`📊 Ready for user requests`);
+    console.log(`CalPin Backend running on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`Test endpoint: http://localhost:${PORT}/api/test`);
+    console.log(`Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
+    console.log(`Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
+    console.log(`Ready for user requests`);
   });
 });

@@ -2,8 +2,6 @@
 //  InformationCardView.swift
 //  CalPin
 //
-//  Enhanced view with sorting and filtering capabilities
-//
 
 import Foundation
 import SwiftUI
@@ -197,6 +195,7 @@ struct InformationCardView_Previews: PreviewProvider {
     static var previews: some View {
         let samplePlaces = [
             Place(
+                id: "1",
                 title: "Need Help with Physics Lab",
                 coordinate: CLLocationCoordinate2D(latitude: 37.8719, longitude: -122.2585),
                 description: "Struggling with quantum mechanics experiment setup. Need someone familiar with the equipment.",
@@ -210,6 +209,7 @@ struct InformationCardView_Previews: PreviewProvider {
                 helpersCount: 0
             ),
             Place(
+                id: "2",
                 title: "Lost Textbook - Organic Chemistry",
                 coordinate: CLLocationCoordinate2D(latitude: 37.8690, longitude: -122.2700),
                 description: "Left my organic chemistry textbook in the library. If anyone finds it, please let me know!",

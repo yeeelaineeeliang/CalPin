@@ -2,14 +2,118 @@
 //  MapView.swift
 //  CalPin
 //
-//  Fixed implementation with exhaustive switches and proper VStack handling
-//
 
 import SwiftUI
 import MapKit
 import Alamofire
 import SwiftyJSON
 import Foundation
+import CoreLocation
+
+// Location Manager for iPhone Maps-like behavior
+class LocationManager: NSObject, ObservableObject {
+    private let locationManager = CLLocationManager()
+    
+    @Published var userLocation: CLLocationCoordinate2D?
+    @Published var authorizationStatus: CLAuthorizationStatus
+    
+    private var locationCompletion: ((Result<CLLocationCoordinate2D, Error>) -> Void)?
+    private var hasRequestedLocation = false
+    
+    override init() {
+        self.authorizationStatus = locationManager.authorizationStatus
+        super.init()
+        
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 10 // Update every 10 meters
+    }
+    
+    func requestLocationPermission() {
+        switch authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+        case .denied, .restricted:
+            print("Location access denied")
+        case .authorizedWhenInUse, .authorizedAlways:
+            startLocationUpdates()
+        @unknown default:
+            break
+        }
+    }
+    
+    func requestCurrentLocation(completion: @escaping (Result<CLLocationCoordinate2D, Error>) -> Void) {
+        self.locationCompletion = completion
+        
+        guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
+            completion(.failure(CLError(.denied)))
+            return
+        }
+        
+        // Request a one-time location update
+        locationManager.requestLocation()
+    }
+    
+    private func startLocationUpdates() {
+        guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
+            return
+        }
+        
+        locationManager.startUpdatingLocation()
+    }
+    
+    private func stopLocationUpdates() {
+        locationManager.stopUpdatingLocation()
+    }
+}
+
+// CLLocationManagerDelegate
+extension LocationManager: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        
+        print("📍 Location updated: \(location.coordinate)")
+        
+        DispatchQueue.main.async {
+            self.userLocation = location.coordinate
+        }
+        
+        // If we have a completion handler (from requestCurrentLocation), call it
+        if let completion = locationCompletion {
+            completion(.success(location.coordinate))
+            locationCompletion = nil
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("❌ Location manager failed with error: \(error.localizedDescription)")
+        
+        if let completion = locationCompletion {
+            completion(.failure(error))
+            locationCompletion = nil
+        }
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        print("📍 Location authorization changed to: \(manager.authorizationStatus.rawValue)")
+        
+        DispatchQueue.main.async {
+            self.authorizationStatus = manager.authorizationStatus
+        }
+        
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            startLocationUpdates()
+        case .denied, .restricted:
+            stopLocationUpdates()
+            userLocation = nil
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+    }
+}
 
 // Helper function to create Place from JSON - keep existing implementation
 func createPlace(from json: [String: Any]) -> Place? {
@@ -21,7 +125,7 @@ func createPlace(from json: [String: Any]) -> Place? {
         let contact = json["contact"] as? String
     else {
         print("❌ Failed to parse place - missing required fields")
-        print("📦 JSON: \(json)")
+        print("JSON: \(json)")
         return nil
     }
 
@@ -83,7 +187,6 @@ extension MKCoordinateRegion: Equatable {
 }
 
 struct MapView: View {
-    @State private var isRefreshing = false
     @Binding var token: String
     @Binding var selectedPlace: Place?
     @ObservedObject var obs: observer
@@ -96,9 +199,12 @@ struct MapView: View {
     @State private var userLocation: CLLocationCoordinate2D?
     @State private var showingLocationAlert = false
     @State private var lastRefreshTime = Date()
-    // @State private var refreshTimer: Timer? // 🔥 REMOVED: No more auto-refresh timer
+    @State private var isLocating = false // Track if we're currently getting location
+    @State private var selectedCategory: AICategory? = nil
+    @State private var showCategoryFilter = true
     
-    private let locationManager = CLLocationManager()
+    @StateObject private var locationManager = LocationManager()
+    
 
     init(token: Binding<String>, selectedPlace: Binding<Place?>, observer: observer) {
         self._token = token
@@ -106,6 +212,7 @@ struct MapView: View {
         self.obs = observer
         _annotations = State(initialValue: [])
     }
+    
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -128,11 +235,10 @@ struct MapView: View {
             .onAppear {
                 setupLocationServices()
                 refreshData()
-                setupNotificationObservers() // 🔥 NEW: Setup observers for manual refresh
+                setupNotificationObservers()
             }
             .onDisappear {
-                // stopAutoRefresh() // 🔥 REMOVED: No auto-refresh to stop
-                removeNotificationObservers() // 🔥 NEW: Clean up observers
+                removeNotificationObservers()
             }
             .onChange(of: token) { newToken in
                 print("🔄 Token changed, refreshing data...")
@@ -140,64 +246,118 @@ struct MapView: View {
                     refreshData()
                 }
             }
+            .onChange(of: locationManager.userLocation) { newLocation in
+                if let location = newLocation {
+                    userLocation = location
+                }
+            }
             
-            // Map controls
-            VStack(spacing: 12) {
-                // 🔥 ENHANCED: Manual refresh button with better visual feedback
-                Button(action: manualRefresh) {
-                    VStack(spacing: 2) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title2)
-                            .foregroundColor(.blue)
-                            .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
-                            .animation(isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+            // NEW: Category Filter Bar (top of screen)
+            VStack(spacing: 0) {
+                if showCategoryFilter {
+                    CategoryFilterView(
+                        selectedCategory: $selectedCategory,
+                        userToken: token
+                    )
+                    .background(
+                        Color(.systemBackground)
+                            .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
+                    )
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                Spacer()
+            }
+            
+            VStack {
+                HStack {
+                    Spacer()
                         
-                        Text("\(annotations.count)")
-                            .font(.caption2)
-                            .foregroundColor(.blue)
+                    VStack(spacing: 12) {
+                        // NEW: Toggle category filter button
+                        Button(action: {
+                            withAnimation(.spring()) {
+                                showCategoryFilter.toggle()
+                            }
+                        }) {
+                            Image(systemName: showCategoryFilter ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                                .font(.title2)
+                                .foregroundColor(Color(red: 0/255, green: 50/255, blue: 98/255))
+                                .padding(12)
+                                .background(Color.white)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                            }
+                            
+                            // Location button
+                            Button(action: {
+                                centerOnUserLocation()
+                            }) {
+                                Image(systemName: locationButtonIcon)
+                                    .font(.title2)
+                                    .foregroundColor(Color(red: 0/255, green: 50/255, blue: 98/255))
+                                    .padding(12)
+                                    .background(Color.white)
+                                    .clipShape(Circle())
+                                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                            }
+                            .disabled(isLocating)
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.top, showCategoryFilter ? 120 : 60)
                     }
-                    .padding(8)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .shadow(radius: 4)
-                }
-                .disabled(isRefreshing)
-                .opacity(isRefreshing ? 0.6 : 1.0)
-                
-                Button(action: centerOnUserLocation) {
-                    Image(systemName: "location.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                        .padding(12)
-                        .background(Color.white)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
+                    
+                    Spacer()
                 }
             }
-            .padding(.trailing, 16)
-            .padding(.top, 60)
+            .onAppear {
+                updateAnnotations()
+                // Set up notification observer for refresh
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("RefreshRequests"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    self.refreshData()
+                }
+            }
+            .alert("Location Access Required", isPresented: $showingLocationAlert) {
+                Button("Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Please enable location access in Settings to see nearby help requests.")
+            }
         }
-        .alert("Location Access", isPresented: $showingLocationAlert) {
-            Button("Settings") {
-                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(settingsUrl)
-                }
+    private var locationButtonIcon: String {
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            return "location"
+        case .denied, .restricted:
+            return "location.slash"
+        case .authorizedWhenInUse, .authorizedAlways:
+            if userLocation != nil {
+                return "location.fill"
+            } else {
+                return "location"
             }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("CalPin needs location access to show nearby help requests and your current position.")
+        @unknown default:
+            return "location"
         }
     }
+
     
-    // 🔥 NEW: Setup notification observers for manual refresh triggers
+    // Setup notification observers for refresh triggers from ContentView
     private func setupNotificationObservers() {
-        // Listen for manual refresh requests (from new request creation, help offers, etc.)
+        // Listen for refresh requests from ContentView or other components
         NotificationCenter.default.addObserver(
-            forName: NSNotification.Name("RefreshMapData"),
+            forName: NSNotification.Name("RefreshRequests"),
             object: nil,
             queue: .main
         ) { _ in
-            print("🔄 Manual refresh requested via notification")
+            print("📍 MapView: Refresh requested via notification")
             self.refreshData()
         }
         
@@ -209,73 +369,118 @@ struct MapView: View {
         ) { _ in
             // Only refresh if it's been more than 1 minute since last refresh
             if Date().timeIntervalSince(self.lastRefreshTime) > 60 {
-                print("🔄 App became active, refreshing data")
+                print("📍 MapView: App became active, refreshing data")
                 self.refreshData()
             }
         }
     }
     
-    // 🔥 NEW: Remove notification observers
+    // Remove notification observers
     private func removeNotificationObservers() {
-        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RefreshMapData"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("RefreshRequests"), object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
     }
     
     private func setupLocationServices() {
-        locationManager.requestWhenInUseAuthorization()
-        
-        switch locationManager.authorizationStatus {
-        case .authorizedWhenInUse, .authorizedAlways:
-            if let location = locationManager.location {
-                userLocation = location.coordinate
-                withAnimation {
-                    region.center = location.coordinate
-                }
-            }
-        case .denied, .restricted:
-            showingLocationAlert = true
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-        @unknown default:
-            break
-        }
+        // The LocationManager will handle requesting permissions
+        locationManager.requestLocationPermission()
     }
     
+    // location centering
     private func centerOnUserLocation() {
-        guard let userLocation = userLocation else {
-            setupLocationServices()
+        print("📍 Location button tapped")
+        
+        // Check current authorization status
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            // Request permission first
+            locationManager.requestLocationPermission()
+            return
+            
+        case .denied, .restricted:
+            // Show settings alert
+            showingLocationAlert = true
+            return
+            
+        case .authorizedWhenInUse, .authorizedAlways:
+            // We have permission, get current location
+            break
+            
+        @unknown default:
+            print("⚠️ Unknown location authorization status")
             return
         }
         
-        withAnimation(.easeInOut(duration: 1.0)) {
-            region.center = userLocation
+        // Start location acquisition with loading state
+        isLocating = true
+        
+        locationManager.requestCurrentLocation { [self] result in
+            DispatchQueue.main.async {
+                self.isLocating = false
+                
+                switch result {
+                case .success(let location):
+                    print("✅ Got current location: \(location)")
+                    
+                    // Update stored user location
+                    self.userLocation = location
+                    
+                    // Animate to user location like iPhone Maps
+                    withAnimation(.easeInOut(duration: 1.2)) {
+                        self.region = MKCoordinateRegion(
+                            center: location,
+                            latitudinalMeters: 1500,  // Closer zoom like Maps app
+                            longitudinalMeters: 1500
+                        )
+                    }
+                    
+                    // Optional: Add haptic feedback like Maps app
+                    let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                    impactFeedback.impactOccurred()
+                    
+                case .failure(let error):
+                    print("❌ Failed to get current location: \(error.localizedDescription)")
+                    
+                    // Show appropriate error message
+                    switch error {
+                    case is CLError:
+                        if let clError = error as? CLError {
+                            switch clError.code {
+                            case .locationUnknown:
+                                // Location service was unable to determine location
+                                print("⚠️ Location unknown - GPS might be having issues")
+                            case .denied:
+                                // Permission denied
+                                self.showingLocationAlert = true
+                            default:
+                                print("⚠️ Location error: \(clError.localizedDescription)")
+                            }
+                        }
+                    default:
+                        print("⚠️ Unknown location error: \(error.localizedDescription)")
+                    }
+                }
+            }
         }
     }
     
     
-    // 🔥 NEW: Manual refresh function (called by button or notifications)
-    private func manualRefresh() {
-        print("👆 Manual refresh button tapped")
-        refreshData()
-    }
-    
+    // Only called by notifications, no manual button
     private func refreshData() {
         guard !token.isEmpty else {
             print("⚠️ Cannot refresh - no token available")
             return
         }
         
-        isRefreshing = true
         selectedPlace = nil
         lastRefreshTime = Date()
         
-        print("🔄 Refreshing data...")
+        print("📍 MapView: Refreshing data...")
         
         obs.fetchData {
             DispatchQueue.main.async {
-                self.isRefreshing = false
                 self.updateAnnotations()
-                print("✅ Refresh completed - \(self.annotations.count) total pins")
+                print("📍 MapView: Refresh completed - \(self.annotations.count) total pins")
             }
         }
     }
@@ -306,7 +511,7 @@ struct MapView: View {
     }
 }
 
-// 🔥 FIXED: Enhanced pin view with proper status handling
+// Enhanced pin view with proper status handling
 struct EnhancedPinView: View {
     let place: Place
     let isSelected: Bool
@@ -315,7 +520,7 @@ struct EnhancedPinView: View {
         place.urgencyLevel.color
     }
     
-    // 🔥 FIXED: Status-aware pin color with exhaustive switch
+    // Status-aware pin color with exhaustive switch
     private var pinColor: Color {
         switch place.status {
         case .open:
@@ -395,7 +600,7 @@ struct EnhancedPinView: View {
                     )
                     .shadow(color: pinColor.opacity(0.4), radius: 6, x: 0, y: 3)
                 
-                // 🔥 FIXED: Status indicators with proper VStack structure
+                // Status indicators with proper VStack structure
                 statusIndicatorOverlay
             }
             
@@ -408,7 +613,7 @@ struct EnhancedPinView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
     }
     
-    // 🔥 FIXED: Separate status indicator overlay to avoid VStack issues
+    // Separate status indicator overlay to avoid VStack issues
     private var statusIndicatorOverlay: some View {
         VStack {
             HStack {
@@ -436,7 +641,7 @@ struct EnhancedPinView: View {
         .frame(width: pinSize, height: pinSize)
     }
     
-    // 🔥 FIXED: Separate selected pin label to avoid VStack issues
+    // Separate selected pin label to avoid VStack issues
     private var selectedPinLabel: some View {
         VStack(spacing: 3) {
             Text(place.title)
@@ -487,7 +692,7 @@ struct EnhancedPinView: View {
         .transition(.opacity.combined(with: .scale))
     }
     
-    // 🔥 FIXED: Helper functions with exhaustive switches
+    // Helper functions with exhaustive switches
     private func statusIndicatorColor() -> Color {
         switch place.status {
         case .open:
@@ -626,7 +831,7 @@ class observer: ObservableObject {
                 }
                 print("🧪 === END TEST ===\n")
             }
-    }
+        }
 }
 
 // Preview

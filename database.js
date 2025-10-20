@@ -10,7 +10,7 @@ const pool = new Pool({
 // Database initialization with AI features
 async function initDatabase() {
   try {
-    console.log('🗄️ Initializing database tables...');
+    console.log('Initializing database tables...');
     
     // Create users table
     await pool.query(`
@@ -91,7 +91,7 @@ async function initDatabase() {
       );
     `);
 
-    console.log('✅ Base tables created successfully');
+    console.log('Base tables created successfully');
     
     // Migrate help_offers columns
     await migrateHelpOffersColumns();
@@ -109,9 +109,9 @@ async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_chat_history_user ON ai_chat_history(user_id);
     `);
 
-    console.log('✅ Database initialized successfully with AI features');
+    console.log('Database initialized successfully with AI features');
   } catch (error) {
-    console.error('❌ Database initialization error:', error);
+    console.error('Database initialization error:', error);
     throw error;
   }
 }
@@ -119,34 +119,35 @@ async function initDatabase() {
 // Migrate help_offers columns
 async function migrateHelpOffersColumns() {
   try {
-    console.log('🔄 Running help_offers column migration...');
+    console.log('Running help_offers column migration...');
     
-    await pool.query(`
-      DO $ 
-      BEGIN
-        -- Add status column if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_offers' AND column_name='status'
-        ) THEN
-          ALTER TABLE help_offers ADD COLUMN status VARCHAR(20) DEFAULT 'active';
-          RAISE NOTICE 'Added status column to help_offers';
-        END IF;
-        
-        -- Add completed_at column if it doesn't exist
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns 
-          WHERE table_name='help_offers' AND column_name='completed_at'
-        ) THEN
-          ALTER TABLE help_offers ADD COLUMN completed_at TIMESTAMP;
-          RAISE NOTICE 'Added completed_at column to help_offers';
-        END IF;
-      END $;
+    // Check and add status column
+    const statusCheck = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='help_offers' AND column_name='status'
     `);
     
-    console.log('✅ help_offers columns migrated successfully');
+    if (statusCheck.rows.length === 0) {
+      await pool.query(`ALTER TABLE help_offers ADD COLUMN status VARCHAR(20) DEFAULT 'active'`);
+      console.log('Added status column to help_offers');
+    }
+    
+    // Check and add completed_at column
+    const completedCheck = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='help_offers' AND column_name='completed_at'
+    `);
+    
+    if (completedCheck.rows.length === 0) {
+      await pool.query(`ALTER TABLE help_offers ADD COLUMN completed_at TIMESTAMP`);
+      console.log('Added completed_at column to help_offers');
+    }
+    
+    console.log('help_offers columns migrated successfully');
   } catch (error) {
-    console.error('❌ help_offers column migration error:', error);
+    console.error('help_offers column migration error:', error);
     throw error;
   }
 }
@@ -154,7 +155,7 @@ async function migrateHelpOffersColumns() {
 // Migrate AI columns to existing help_requests table
 async function migrateAIColumns() {
   try {
-    console.log('🔄 Running AI column migration...');
+    console.log('Running AI column migration...');
     
     const columnsToAdd = [
       { name: 'ai_category', type: 'VARCHAR(50)' },
@@ -177,13 +178,13 @@ async function migrateAIColumns() {
       
       if (checkResult.rows.length === 0) {
         await pool.query(`ALTER TABLE help_requests ADD COLUMN ${column.name} ${column.type}`);
-        console.log(`✅ Added ${column.name} column`);
+        console.log('Added ' + column.name + ' column');
       }
     }
     
-    console.log('✅ AI columns migrated successfully');
+    console.log('AI columns migrated successfully');
   } catch (error) {
-    console.error('❌ AI column migration error:', error);
+    console.error('AI column migration error:', error);
     throw error;
   }
 }
@@ -230,10 +231,10 @@ const db = {
     const lng = typeof longitude === 'string' ? parseFloat(longitude) : longitude;
     
     if (isNaN(lat) || isNaN(lng)) {
-      throw new Error(`Invalid coordinates: lat=${lat}, lng=${lng}`);
+      throw new Error('Invalid coordinates: lat=' + lat + ', lng=' + lng);
     }
     
-    console.log('📝 Creating request with AI data:', {
+    console.log('Creating request with AI data:', {
       title,
       aiCategory,
       aiCategoryName,
@@ -252,7 +253,7 @@ const db = {
        aiEstimatedTime, aiTags, aiSuggestedTitle, aiSafetyCheck, aiSafetyReason]
     );
     
-    console.log('✅ Request created with ID:', result.rows[0].id);
+    console.log('Request created with ID:', result.rows[0].id);
     return result.rows[0];
   },
 
@@ -325,9 +326,9 @@ const db = {
          VALUES ($1, $2, $3)`,
         [requestId, insightType, JSON.stringify(insightData)]
       );
-      console.log('✅ AI insight saved for request:', requestId);
+      console.log('AI insight saved for request:', requestId);
     } catch (error) {
-      console.error('❌ Failed to save AI insight:', error.message);
+      console.error('Failed to save AI insight:', error.message);
     }
   },
 

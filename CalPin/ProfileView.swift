@@ -7,7 +7,6 @@
 import SwiftUI
 import Alamofire
 
-// MARK: - User Statistics Models
 struct UserStats: Codable {
     let requestsMade: Int
     let peopleHelped: Int
@@ -358,13 +357,6 @@ struct ProfileView: View {
                     )
                     
                     StatRowView(
-                        title: "Completion Rate",
-                        value: "\(stats.safeCompletionRate)%",
-                        icon: "checkmark.circle.fill",
-                        description: "Percentage of your requests that got help"
-                    )
-                    
-                    StatRowView(
                         title: "Last Activity",
                         value: stats.lastActivityFormatted,
                         icon: "clock.fill",
@@ -376,7 +368,6 @@ struct ProfileView: View {
                 .cornerRadius(16)
                 .shadow(color: .black.opacity(0.05), radius: 4)
                 
-                // Weekly activity chart (simplified)
                 if !stats.safeWeeklyActivity.isEmpty {
                     weeklyActivityView(activity: stats.safeWeeklyActivity)
                 }
@@ -402,7 +393,7 @@ struct ProfileView: View {
         .shadow(color: .black.opacity(0.1), radius: 8)
     }
     
-    // MARK: - Achievements Content
+    // Achievements Content
     private var achievementsContentView: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -443,7 +434,7 @@ struct ProfileView: View {
         .shadow(color: .black.opacity(0.1), radius: 8)
     }
     
-    // MARK: - Activity Content
+    // Activity Content
     private var activityContentView: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -484,7 +475,7 @@ struct ProfileView: View {
         .shadow(color: .black.opacity(0.1), radius: 8)
     }
     
-    // MARK: - Sign Out Button
+    // Sign Out Button
     private var signOutButton: some View {
         Button(action: onSignOut) {
             HStack {
@@ -504,7 +495,7 @@ struct ProfileView: View {
         .padding(.bottom, 40)
     }
     
-    // MARK: - Helper Views
+    // Helper Views
     
     private func streakCardView(streak: Int) -> some View {
         HStack {
@@ -582,7 +573,6 @@ struct ProfileView: View {
         .shadow(color: .black.opacity(0.05), radius: 4)
     }
     
-    // MARK: - Data Fetching
     
     private func fetchUserData() {
         isLoadingStats = true
@@ -766,7 +756,7 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Supporting Views
+//  Supporting Views
 
 struct TabButton: View {
     let title: String
@@ -972,7 +962,6 @@ struct ActivityRowView: View {
             
             Spacer()
             
-            // Urgency indicator
             if let urgencyLevel = UrgencyLevel(rawValue: item.urgencyLevel) {
                 UrgencyDot(level: urgencyLevel)
             }

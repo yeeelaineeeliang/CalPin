@@ -854,11 +854,83 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
   }
 });
 
-//  User statistics
+app.get('/api/debug/my-stats', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log('🔍 DEBUG MY STATS');
+    console.log('🔍 User ID:', userId);
+    console.log('🔍 User ID type:', typeof userId);
+    console.log('🔍 User email:', req.user.email);
+    
+    if (!databaseConnected) {
+      return res.json({ error: 'Database not connected' });
+    }
+    
+    // Check all authors in database
+    const allAuthors = await db.pool.query(`
+      SELECT DISTINCT author_id, author_name, COUNT(*) as count
+      FROM help_requests
+      GROUP BY author_id, author_name
+      ORDER BY count DESC
+    `);
+    
+    // Check YOUR requests
+    const myRequests = await db.pool.query(`
+      SELECT id, title, author_id, author_name, created_at
+      FROM help_requests
+      WHERE author_id = $1
+      ORDER BY created_at DESC
+    `, [userId]);
+    
+    // Check if user exists in users table
+    const userExists = await db.pool.query(`
+      SELECT * FROM users WHERE id = $1
+    `, [userId]);
+    
+    // Try alternative queries
+    const castQuery = await db.pool.query(`
+      SELECT COUNT(*) as count
+      FROM help_requests
+      WHERE CAST(author_id AS TEXT) = CAST($1 AS TEXT)
+    `, [userId]);
+    
+    res.json({
+      debugInfo: {
+        yourUserId: userId,
+        yourUserIdType: typeof userId,
+        yourEmail: req.user.email,
+        userExistsInDB: userExists.rows.length > 0,
+        userRecord: userExists.rows[0] || null
+      },
+      allAuthorsInDatabase: allAuthors.rows,
+      yourRequestsFound: myRequests.rows.length,
+      yourRequests: myRequests.rows,
+      castQueryResult: castQuery.rows[0].count,
+      diagnosis: {
+        requestsInDB: myRequests.rows.length > 0,
+        userIdMatches: myRequests.rows.length > 0 ? myRequests.rows[0].author_id === userId : false,
+        possibleIssue: myRequests.rows.length === 0 ? 'User ID not matching' : 'Query issue'
+      }
+    });
+    
+  } catch (error) {
+    console.error('🔍 Debug error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// //  User statistics
 app.get('/api/user/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('📊 Fetching dynamic stats for user:', req.user.email);
+    console.log('===== FETCHING STATS =====');
+    console.log('User:', req.user.email);
+    console.log('User ID:', userId);
+    console.log('User ID Type:', typeof userId);
     
     let stats = {
       requestsMade: 0,
@@ -880,12 +952,30 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
         const client = await db.pool.connect();
         
         try {
-          // 1. Get user's requests made
+          // DIAGNOSTIC: Check what author IDs exist
+          const authorCheck = await client.query(`
+            SELECT DISTINCT author_id, COUNT(*) as count
+            FROM help_requests
+            GROUP BY author_id
+          `);
+          console.log(' All author IDs in DB:', authorCheck.rows);
+          
+          // DIAGNOSTIC: Check this specific user
+          const userCheck = await client.query(`
+            SELECT id, title, author_id, created_at
+            FROM help_requests
+            WHERE author_id = $1
+          `, [userId]);
+          console.log(' Requests for this user ID:', userCheck.rows.length);
+          console.log(' Sample requests:', userCheck.rows.slice(0, 2));
+          
+          // Original query - 1. Get user's requests made
           const requestsResult = await client.query(
             'SELECT COUNT(*) as count, MIN(created_at) as first_request FROM help_requests WHERE author_id = $1',
             [userId]
           );
           stats.requestsMade = parseInt(requestsResult.rows[0].count) || 0;
+          console.log('Requests made:', stats.requestsMade);
           
           // 2. Get help offers made by user (people helped)
           const helpResult = await client.query(`
@@ -898,115 +988,26 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           
           const helpStats = helpResult.rows[0];
           stats.peopleHelped = parseInt(helpStats.unique_requests_helped) || 0;
-          // Convert lastActivity to ISO string if it exists
+          console.log(' People helped:', stats.peopleHelped);
+          
           if (helpStats.last_help_offered) {
             stats.lastActivity = new Date(helpStats.last_help_offered).toISOString();
           }
 
           // 3. Get recent activity (this week)
           const weekAgoResult = await client.query(`
-            SELECT COUNT(DISTINCT ho.request_id) as requests_helped_this_week,
-                   COUNT(*) as total_actions_this_week
+            SELECT COUNT(DISTINCT ho.request_id) as requests_helped_this_week
             FROM help_offers ho 
             WHERE ho.helper_id = $1 AND ho.created_at > NOW() - INTERVAL '7 days'
           `, [userId]);
           
           stats.thisWeek = parseInt(weekAgoResult.rows[0].requests_helped_this_week) || 0;
 
-          // 4. Calculate community points (dynamic scoring system)
-          const pointsResult = await client.query(`
-            SELECT 
-              COUNT(DISTINCT ho.request_id) as unique_requests_helped,
-              COUNT(CASE WHEN hr.urgency_level = 'Urgent' THEN 1 END) as urgent_helps,
-              COUNT(CASE WHEN hr.urgency_level = 'High' THEN 1 END) as high_helps,
-              COUNT(CASE WHEN hr.urgency_level = 'Medium' THEN 1 END) as medium_helps,
-              COUNT(CASE WHEN hr.urgency_level = 'Low' THEN 1 END) as low_helps,
-              COUNT(CASE WHEN ho.created_at > NOW() - INTERVAL '24 hours' THEN 1 END) as quick_responses
-            FROM help_offers ho
-            JOIN help_requests hr ON ho.request_id = hr.id
-            WHERE ho.helper_id = $1
-          `, [userId]);
-
-          const points = pointsResult.rows[0];
-          // Dynamic point calculation
-          stats.communityPoints = 
-            (parseInt(points.urgent_helps) || 0) * 25 +     // 25 points for urgent help
-            (parseInt(points.high_helps) || 0) * 15 +       // 15 points for high priority
-            (parseInt(points.medium_helps) || 0) * 10 +     // 10 points for medium priority
-            (parseInt(points.low_helps) || 0) * 5 +         // 5 points for low priority
-            (parseInt(points.quick_responses) || 0) * 5 +   // 5 bonus points for quick responses
-            stats.requestsMade * 2;                         // 2 points for each request made
-
-          // 5. Calculate current streak (consecutive weeks with at least 1 help)
-          const streakResult = await client.query(`
-            WITH weekly_activity AS (
-              SELECT 
-                DATE_TRUNC('week', ho.created_at) as week,
-                COUNT(DISTINCT ho.request_id) as helps_count
-              FROM help_offers ho
-              WHERE ho.helper_id = $1
-                AND ho.created_at >= NOW() - INTERVAL '20 weeks'
-              GROUP BY DATE_TRUNC('week', ho.created_at)
-              ORDER BY week DESC
-            ),
-            streak_calc AS (
-              SELECT 
-                week,
-                helps_count,
-                ROW_NUMBER() OVER (ORDER BY week DESC) as week_rank,
-                CASE 
-                  WHEN helps_count > 0 THEN 1 
-                  ELSE 0 
-                END as has_activity
-              FROM weekly_activity
-            )
-            SELECT COUNT(*) as streak
-            FROM streak_calc 
-            WHERE has_activity = 1 
-              AND week_rank <= (
-                SELECT COALESCE(MIN(week_rank), 0)
-                FROM streak_calc 
-                WHERE has_activity = 0 AND week_rank > 0
-              )
-          `, [userId]);
-
-          stats.currentStreak = parseInt(streakResult.rows[0].streak) || 0;
-
-          // 6. Calculate completion rate
-          const completionResult = await client.query(`
-            SELECT 
-              COUNT(*) as total_requests_made,
-              COUNT(CASE WHEN hr.status = 'Completed' THEN 1 END) as completed_requests
-            FROM help_requests hr
-            WHERE hr.author_id = $1
-          `, [userId]);
-
-          const completion = completionResult.rows[0];
-          if (parseInt(completion.total_requests_made) > 0) {
-            stats.completionRate = Math.round(
-              (parseInt(completion.completed_requests) / parseInt(completion.total_requests_made)) * 100
-            );
-          }
-
-          // 7. Get weekly activity for the past 7 weeks
-          const weeklyActivityResult = await client.query(`
-            SELECT 
-              DATE_TRUNC('week', ho.created_at) as week,
-              COUNT(DISTINCT ho.request_id) as helps_count
-            FROM help_offers ho
-            WHERE ho.helper_id = $1
-              AND ho.created_at >= NOW() - INTERVAL '7 weeks'
-            GROUP BY DATE_TRUNC('week', ho.created_at)
-            ORDER BY week DESC
-            LIMIT 7
-          `, [userId]);
-
-          stats.weeklyActivity = weeklyActivityResult.rows.map(row => ({
-            week: row.week.toISOString(),
-            helpsCount: parseInt(row.helps_count)
-          }));
-
-          // 8. Get user join date from users table
+          // 4. Calculate community points
+          stats.communityPoints = stats.peopleHelped * 10 + stats.requestsMade * 2;
+          console.log(' Community points:', stats.communityPoints);
+          
+          // 5. Get user join date
           const userResult = await client.query(
             'SELECT created_at FROM users WHERE id = $1',
             [userId]
@@ -1015,74 +1016,30 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           if (userResult.rows.length > 0) {
             stats.joinDate = userResult.rows[0].created_at.toISOString();
           } else {
+            console.log('⚠️ User not found in users table!');
             stats.joinDate = new Date().toISOString();
           }
-
-          // 9. Calculate total connections made (unique people helped + people who helped user)
-          const connectionsResult = await client.query(`
-            SELECT COUNT(DISTINCT connections.user_id) as total_connections
-            FROM (
-              SELECT hr.author_id as user_id
-              FROM help_offers ho
-              JOIN help_requests hr ON ho.request_id = hr.id
-              WHERE ho.helper_id = $1
-              UNION
-              SELECT ho.helper_id as user_id
-              FROM help_offers ho
-              JOIN help_requests hr ON ho.request_id = hr.id
-              WHERE hr.author_id = $1
-            ) connections
-            WHERE connections.user_id != $1
-          `, [userId, userId]);
-
-          stats.totalConnectionsMade = parseInt(connectionsResult.rows[0].total_connections) || 0;
-
-          console.log('  Dynamic stats calculated successfully:', stats);
+          
+          console.log(' Final stats:', stats);
+          console.log(' ===== STATS COMPLETE =====');
           
         } finally {
           client.release();
         }
         
       } catch (dbError) {
-        console.log('  Database stats calculation failed:', dbError.message);
-        // Return default stats if database fails
-        stats = {
-          requestsMade: 0,
-          peopleHelped: 0,
-          communityPoints: 0,
-          thisWeek: 0,
-          currentStreak: 0,
-          totalConnectionsMade: 0,
-          completionRate: 0,
-          joinDate: new Date(),
-          lastActivity: null,
-          weeklyActivity: []
-        };
+        console.error(' Database stats error:', dbError.message);
+        console.error(' Error details:', dbError);
       }
-    } else {
-
-      const userRequests = fallbackRequests.filter(r => r.authorId === userId);
-      const userHelps = fallbackRequests.filter(r => 
-        r.helpers && r.helpers.includes(userId) ||
-        r.completedHelpers && r.completedHelpers.includes(userId)
-      );
-
-      stats.requestsMade = userRequests.length;
-      stats.peopleHelped = userHelps.length;
-      stats.communityPoints = userHelps.length * 10 + userRequests.length * 2;
-      
-      // Calculate this week's activity
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-      stats.thisWeek = userHelps.filter(r => new Date(r.createdAt) > oneWeekAgo).length;
     }
 
     res.json(stats);
   } catch (error) {
-    console.error('  User stats error:', error);
+    console.error(' Stats endpoint error:', error);
     res.status(500).json({ error: 'Failed to get user stats' });
   }
 });
+
 
 // Get user achievements
 app.get('/api/user/achievements', authenticateToken, async (req, res) => {
@@ -1709,7 +1666,7 @@ app.post('/api/ai/detect-duplicates', authenticateToken, async (req, res) => {
 app.get('/api/ai/weekly-summary', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('📊 Generating weekly summary for:', req.user.email);
+    console.log(' Generating weekly summary for:', req.user.email);
 
     let stats = { thisWeek: 0, communityPoints: 0, streak: 0 };
     let activities = [];

@@ -48,7 +48,9 @@ async function initDatabase() {
         request_id INTEGER REFERENCES help_requests(id),
         helper_id VARCHAR(255) REFERENCES users(id),
         helper_name VARCHAR(255) NOT NULL,
+        status VARCHAR(20) DEFAULT 'active',
         created_at TIMESTAMP DEFAULT NOW(),
+        completed_at TIMESTAMP,
         UNIQUE(request_id, helper_id)
       );
     `);
@@ -91,6 +93,9 @@ async function initDatabase() {
 
     console.log(' Base tables created successfully');
     
+    // Migrate help_offers columns
+    await migrateHelpOffersColumns();
+    
     // Now migrate AI columns to help_requests
     await migrateAIColumns();
     
@@ -106,7 +111,42 @@ async function initDatabase() {
 
     console.log(' Database initialized successfully with AI features');
   } catch (error) {
-    console.error('  Database initialization error:', error);
+    console.error(' Database initialization error:', error);
+    throw error;
+  }
+}
+
+// Migrate help_offers columns
+async function migrateHelpOffersColumns() {
+  try {
+    console.log('🔄 Running help_offers column migration...');
+    
+    await pool.query(`
+      DO $ 
+      BEGIN
+        -- Add status column if it doesn't exist
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name='help_offers' AND column_name='status'
+        ) THEN
+          ALTER TABLE help_offers ADD COLUMN status VARCHAR(20) DEFAULT 'active';
+          RAISE NOTICE 'Added status column to help_offers';
+        END IF;
+        
+        -- Add completed_at column if it doesn't exist
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name='help_offers' AND column_name='completed_at'
+        ) THEN
+          ALTER TABLE help_offers ADD COLUMN completed_at TIMESTAMP;
+          RAISE NOTICE 'Added completed_at column to help_offers';
+        END IF;
+      END $;
+    `);
+    
+    console.log(' help_offers columns migrated successfully');
+  } catch (error) {
+    console.error(' help_offers column migration error:', error);
     throw error;
   }
 }
@@ -114,7 +154,7 @@ async function initDatabase() {
 // Migrate AI columns to existing help_requests table
 async function migrateAIColumns() {
   try {
-    console.log('  Running AI column migration...');
+    console.log('🔄 Running AI column migration...');
     
     await pool.query(`
       DO $$ 
@@ -202,9 +242,9 @@ async function migrateAIColumns() {
       END $$;
     `);
     
-    console.log(' AI columns migrated successfully');
+    console.log('AI columns migrated successfully');
   } catch (error) {
-    console.error('  AI column migration error:', error);
+    console.error('AI column migration error:', error);
     throw error;
   }
 }
@@ -254,7 +294,7 @@ const db = {
       throw new Error(`Invalid coordinates: lat=${lat}, lng=${lng}`);
     }
     
-    console.log('Creating request with AI data:', {
+    console.log('📝 Creating request with AI data:', {
       title,
       aiCategory,
       aiCategoryName,
@@ -288,7 +328,7 @@ const db = {
       LEFT JOIN (
         SELECT request_id, 
           COUNT(*) as helpers_count,
-          COUNT(CASE WHEN status != 'completed' THEN 1 END) as active_helpers,
+          COUNT(CASE WHEN (status IS NULL OR status != 'completed') THEN 1 END) as active_helpers,
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_helpers
         FROM help_offers
         GROUP BY request_id
@@ -348,7 +388,7 @@ const db = {
       );
       console.log(' AI insight saved for request:', requestId);
     } catch (error) {
-      console.error('  Failed to save AI insight:', error.message);
+      console.error(' Failed to save AI insight:', error.message);
     }
   },
 

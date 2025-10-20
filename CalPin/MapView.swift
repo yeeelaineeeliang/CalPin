@@ -263,6 +263,7 @@ struct MapView: View {
                         Color(.systemBackground)
                             .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
                     )
+                    .padding(.top)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 Spacer()

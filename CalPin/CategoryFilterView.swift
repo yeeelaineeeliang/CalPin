@@ -6,6 +6,9 @@
 import SwiftUI
 import Alamofire
 
+import SwiftUI
+import Alamofire
+
 // Category with count for display
 struct CategoryWithCount: Identifiable {
     let id: String
@@ -26,44 +29,52 @@ struct CategoryFilterView: View {
     private let berkeleyBlue = Color(red: 0/255, green: 50/255, blue: 98/255)
     
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                // "All" category chip
-                CategoryChip(
-                    title: "All",
-                    icon: "list.bullet",
-                    count: categories.reduce(0) { $0 + $1.count },
-                    color: berkeleyBlue,
-                    isSelected: selectedCategory == nil
-                ) {
-                    withAnimation(.spring(response: 0.3)) {
-                        selectedCategory = nil
-                    }
-                }
-                
-                // Category chips
-                ForEach(categories) { categoryWithCount in
+        VStack(spacing: 0) {
+            // Add safe area padding at top
+            Color.clear
+                .frame(height: 0)
+                .background(Color(.systemBackground))
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    // "All" category chip
                     CategoryChip(
-                        title: categoryWithCount.displayName,
-                        icon: categoryWithCount.icon,
-                        count: categoryWithCount.count,
-                        color: categoryWithCount.color,
-                        isSelected: selectedCategory == categoryWithCount.category
+                        title: "All",
+                        icon: "list.bullet",
+                        count: categories.reduce(0) { $0 + $1.count },
+                        color: berkeleyBlue,
+                        isSelected: selectedCategory == nil
                     ) {
                         withAnimation(.spring(response: 0.3)) {
-                            if selectedCategory == categoryWithCount.category {
-                                selectedCategory = nil
-                            } else {
-                                selectedCategory = categoryWithCount.category
+                            selectedCategory = nil
+                        }
+                    }
+                    
+                    // Category chips
+                    ForEach(categories) { categoryWithCount in
+                        CategoryChip(
+                            title: categoryWithCount.displayName,
+                            icon: categoryWithCount.icon,
+                            count: categoryWithCount.count,
+                            color: categoryWithCount.color,
+                            isSelected: selectedCategory == categoryWithCount.category
+                        ) {
+                            withAnimation(.spring(response: 0.3)) {
+                                if selectedCategory == categoryWithCount.category {
+                                    selectedCategory = nil
+                                } else {
+                                    selectedCategory = categoryWithCount.category
+                                }
                             }
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12) // Increased vertical padding
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
+        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
         .onAppear {
             fetchCategories()
         }

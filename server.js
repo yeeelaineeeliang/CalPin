@@ -1569,8 +1569,7 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
 // AI analysis
 app.post('/api/create', authenticateToken, async (req, res) => {
   try {
-    console.log('\n=== CREATE REQUEST WITH AI DEBUG ===');
-    console.log('Request received from:', req.user.email);
+    console.log('CREATE REQUEST WITH AI');
     
     let requestData = req.body;
     if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
@@ -1590,79 +1589,59 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       longitude
     } = requestData;
 
-    // Validation
     if (!title || !description || !address || !contact) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: title, description, address, contact'
-      });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // AI ANALYSIS - Categorize and analyze the request
-    console.log('Running AI analysis on request...');
+    // AI ANALYSIS - ADD THIS IF MISSING
+    console.log('Running AI categorization...');
     const aiAnalysis = await aiService.categorizeRequest(title, description, urgencyLevel);
+    console.log('AI Result:', JSON.stringify(aiAnalysis));
     
-    // Check safety
     if (aiAnalysis.safetyCheck === 'flagged') {
-      console.log('Request flagged by AI:', aiAnalysis.safetyReason);
       return res.status(400).json({
         error: 'Request could not be created',
-        reason: 'Content does not meet community guidelines',
-        details: aiAnalysis.safetyReason
+        reason: 'Content does not meet community guidelines'
       });
     }
 
-    if (databaseConnected) {
-      try {
-        const statsResult = await db.pool.query(`
-          SELECT 
-            COUNT(DISTINCT hr.id) as request_count,
-            COUNT(DISTINCT ho.request_id) as help_count
-          FROM users u
-          LEFT JOIN help_requests hr ON hr.author_id = u.id  
-          LEFT JOIN help_offers ho ON ho.helper_id = u.id
-          WHERE u.id = $1
-        `, [req.user.id]);
-        
-        if (statsResult.rows.length > 0) {
-          userStats.requestCount = parseInt(statsResult.rows[0].request_count) || 0;
-          userStats.helpCount = parseInt(statsResult.rows[0].help_count) || 0;
-        }
-      } catch (err) {
-        console.log('Could not fetch user stats for chat context');
-      }
-    }
-
-    const context = {
-      userName: req.user.name,
-      helpCount: userStats.helpCount,
-      requestCount: userStats.requestCount
-    };
-
-    const response = await aiService.chatAssistant(message, context);
-
-    // Save chat interaction
-    if (databaseConnected) {
-      try {
-        await db.saveChatInteraction(req.user.id, message, response, context);
-      } catch (err) {
-        console.log('Could not save chat interaction');
-      }
-    }
-
-    res.json({
-      message: response,
-      context: {
-        userName: req.user.name,
-        yourHelpCount: userStats.helpCount
-      }
+    // Create request WITH AI fields
+    const newRequest = await db.createRequest({
+      title,
+      description,
+      latitude,
+      longitude,
+      contact,
+      urgencyLevel,
+      authorId: req.user.id,
+      authorName: req.user.name,
+      // AI fields - MAKE SURE THESE ARE PASSED
+      aiCategory: aiAnalysis.category,
+      aiCategoryIcon: aiAnalysis.categoryIcon,
+      aiCategoryName: aiAnalysis.categoryName,
+      aiDetectedUrgency: aiAnalysis.detectedUrgency,
+      aiEstimatedTime: aiAnalysis.estimatedTime,
+      aiTags: aiAnalysis.tags,
+      aiSuggestedTitle: aiAnalysis.suggestedTitle,
+      aiSafetyCheck: aiAnalysis.safetyCheck,
+      aiSafetyReason: aiAnalysis.safetyReason
     });
 
+    await db.saveAIInsight(newRequest.id, 'categorization', aiAnalysis);
+
+    res.status(201).json({
+      message: 'Request created successfully',
+      request: newRequest,
+      aiAnalysis: {
+        category: aiAnalysis.categoryName,
+        icon: aiAnalysis.categoryIcon,
+        tags: aiAnalysis.tags
+      }
+    });
+    
   } catch (error) {
-    console.error('AI chat error:', error);
-    res.status(500).json({ 
-      error: 'AI assistant temporarily unavailable',
-      message: "I'm having trouble connecting right now. Try again in a moment!"
-    });
+    console.error('Create error:', error);
+    res.status(500).json({ error: 'Failed to create request' });
   }
 });
 

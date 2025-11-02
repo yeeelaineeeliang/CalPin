@@ -3,7 +3,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 class AIService {
   constructor() {
     this.client = new Anthropic({
-      apiKey: process.env.ANsTHROPIC_API_KEY,
+      apiKey: process.env.ANTHROPIC_API_KEY,
     });
     
     // Configuration
@@ -12,12 +12,22 @@ class AIService {
     
     // Categories for request classification
     this.categories = [
-      { id: 'academic', name: 'Academic', icon: '📚', keywords: ['homework', 'study', 'exam', 'assignment', 'tutor', 'class', 'calculus', 'physics', 'chemistry', 'math'] },
-      { id: 'technical', name: 'Technical', icon: '💻', keywords: ['code', 'computer', 'software', 'debug', 'programming', 'website', 'app', 'laptop'] },
+      { id: 'academic', 
+        name: 'Academic', 
+        icon: '📚',     
+        keywords: ['homework', 'study', 'exam', 'assignment', 'tutor', 'class', 'calculus', 'physics', 'chemistry', 'math', 'biology', 'cs','essay', 'paper', 'project', 'lab', 'research', 'thesis',
+        'midterm', 'final', 'quiz', 'lecture', 'notes', 'textbook','course', 'subject', 'learning', 'education', 'academic', 'application']
+      },
+      { id: 'technical', 
+        name: 'Technical', 
+        icon: '💻', 
+        keywords: ['code', 'computer', 'software', 'debug', 'programming', 'website', 'app', 'laptop', 'python', 'java', 'javascript', 'git', 'github', 'error', 'bug',
+      'install', 'setup', 'configure', 'tech', 'device', 'phone', 'wifi','network', 'server', 'database', 'api', 'terminal', 'compile']
+      },
       { id: 'social', name: 'Social', icon: '🤝', keywords: ['friend', 'talk', 'lonely', 'meet', 'hangout', 'connect', 'social', 'party'] },
-      { id: 'transportation', name: 'Transportation', icon: '🚗', keywords: ['ride', 'drive', 'car', 'bus', 'transport', 'airport', 'pickup', 'drop'] },
+      { id: 'transportation', name: 'Transportation', icon: '🚗', keywords: ['ride', 'drive', 'car', 'bus', 'transport', 'airport', 'pickup', 'drop', 'carpool'] },
       { id: 'moving', name: 'Moving/Carrying', icon: '📦', keywords: ['move', 'carry', 'lift', 'furniture', 'heavy', 'box', 'load'] },
-      { id: 'food', name: 'Food & Dining', icon: '🍕', keywords: ['food', 'meal', 'hungry', 'eat', 'restaurant', 'lunch', 'dinner', 'cook'] },
+      { id: 'food', name: 'Foodie', icon: '🍕', keywords: ['food', 'meal', 'hungry', 'eat', 'restaurant', 'lunch', 'dinner', 'cook'] },
       { id: 'health', name: 'Health & Wellness', icon: '🏥', keywords: ['sick', 'doctor', 'medicine', 'health', 'hospital', 'injury', 'wellness', 'mental'] },
       { id: 'emergency', name: 'Emergency', icon: '🚨', keywords: ['urgent', 'emergency', 'asap', 'help', 'critical', 'immediately', 'now'] },
       { id: 'other', name: 'Other', icon: '📌', keywords: [] }
@@ -33,25 +43,38 @@ class AIService {
    */
   async categorizeRequest(title, description, urgencyLevel) {
     try {
-      const prompt = `You are analyzing a help request from a UC Berkeley student. Categorize this request and provide helpful insights.
+      const prompt = `You are analyzing a help request from a UC Berkeley student. Categorize this request correctly.
 
-Request Title: ${title}
-Description: ${description}
-User-Selected Urgency: ${urgencyLevel}
+    Request Title: ${title}
+    Description: ${description}
+    User-Selected Urgency: ${urgencyLevel}
 
-Available categories:
-${this.categories.map(c => `- ${c.name} (${c.id}): For requests about ${c.keywords.slice(0, 5).join(', ')}`).join('\n')}
+    Available categories:
+    ${this.categories.map(c => `- ${c.name} (${c.id})`).join('\n')}
 
-Analyze this request and respond with a JSON object containing:
-1. "category": The most appropriate category ID from the list above
-2. "suggestedTitle": A clearer, more descriptive title (if needed, otherwise same as original)
-3. "estimatedTime": Estimated time needed in minutes (just the number)
-4. "detectedUrgency": Your assessment of true urgency: "Low", "Medium", "High", or "Emergency"
-5. "tags": Array of 2-4 relevant tags
-6. "safetyCheck": "safe" or "flagged" - flag if request seems inappropriate, unsafe, or violates community guidelines
-7. "safetyReason": If flagged, explain why briefly
+    EXAMPLES:
+    - "Need help with physics homework" → academic
+    - "Laptop won't boot, need tech help" → technical  
+    - "Moving furniture, need strong people" → moving
+    - "Ride to airport tomorrow morning" → transportation
+    - "Feeling lonely, want to grab coffee" → social
 
-Respond ONLY with valid JSON, no markdown or other text.`;
+    RULES:
+    1. If request mentions multiple categories, choose the PRIMARY need
+    2. Only use "emergency" for true emergencies (safety, health crisis)
+    3. Flag as unsafe if: spam, harassment, illegal activity, personal info requests
+    4. Estimated time should be realistic (5-120 minutes typically)
+
+    Respond ONLY with valid JSON containing:
+    {
+      "category": "category_id",
+      "suggestedTitle": "improved title if needed, otherwise original",
+      "estimatedTime": 30,
+      "detectedUrgency": "Low|Medium|High|Emergency",
+      "tags": ["tag1", "tag2", "tag3"],
+      "safetyCheck": "safe|flagged",
+      "safetyReason": "reason if flagged, otherwise null"
+    }`;
 
       const message = await this.client.messages.create({
         model: this.model,
@@ -65,14 +88,25 @@ Respond ONLY with valid JSON, no markdown or other text.`;
       const responseText = message.content[0].text;
       const analysis = JSON.parse(responseText);
 
+      // Validate required fields
+      if (!analysis.category || !this.categories.find(c => c.id === analysis.category)) {
+        console.error('Invalid category:', analysis.category);
+        throw new Error('Invalid category from AI');
+      }
+      
+      // Set defaults for missing fields
+      analysis.suggestedTitle = analysis.suggestedTitle || title;
+      analysis.estimatedTime = analysis.estimatedTime || 30;
+      analysis.detectedUrgency = analysis.detectedUrgency || urgencyLevel;
+      analysis.tags = analysis.tags || [];
+      analysis.safetyCheck = analysis.safetyCheck || 'safe';
+      
       // Add category metadata
       const categoryInfo = this.categories.find(c => c.id === analysis.category);
-      analysis.categoryIcon = categoryInfo?.icon || '📌';
-      analysis.categoryName = categoryInfo?.name || 'Other';
-
-      console.log('Request categorized:', analysis);
+      analysis.categoryIcon = categoryInfo.icon;
+      analysis.categoryName = categoryInfo.name;
+      
       return analysis;
-
     } catch (error) {
       console.error('AI categorization error:', error.message);
       // Fallback to simple keyword matching

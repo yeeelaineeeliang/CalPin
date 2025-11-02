@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>Privacy - Location Always and When In Use Usage Description</key>
+	<string>CalPin uses your location to help you find and offer assistance to nearby students.</string>
+	<key>Privacy - Location When In Use Usage Description</key>
+	<string>CalPin needs your location to show nearby help requests and calculate distances.</string>
 	<key>Application Scene Manifest</key>
 	<dict>
 		<key>Enable Multiple Windows</key>

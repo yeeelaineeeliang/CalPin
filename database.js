@@ -273,7 +273,7 @@ const db = {
         FROM help_offers
         GROUP BY request_id
       ) h ON r.id = h.request_id
-      WHERE r.created_at > NOW() - INTERVAL '24 hours'
+      WHERE r.created_at > NOW() - INTERVAL '48 hours'
         AND r.status NOT IN ('completed', 'cancelled')
         AND (r.ai_safety_check = 'safe' OR r.ai_safety_check IS NULL)
       ORDER BY r.created_at DESC

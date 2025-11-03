@@ -187,7 +187,9 @@ struct ContentView: View {
             RequestView(
                     token: $userSession.token,
                     userEmail: userSession.userEmail,
-                    onRequestCreated: handleRequestCreated
+                    onRequestCreated: {
+                                handleRequestCreated()
+                            }
                 )
         }
         .sheet(isPresented: $showingProfile) {

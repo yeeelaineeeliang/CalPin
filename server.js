@@ -351,167 +351,6 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
   }
 });
 
-// POST /api/create - Create a new help request
-// app.post('/api/create', authenticateToken, async (req, res) => {
-//   try {
-//     console.log('\n🔧 === CREATE REQUEST DEBUG ===');
-//     console.log('🔨 Request received from:', req.user.email);
-//     console.log('  Body received:', JSON.stringify(req.body, null, 2));
-    
-//     // Handle both direct object and nested object structures
-//     let requestData = req.body;
-    
-//     if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
-//       const firstKey = Object.keys(req.body)[0];
-//       if (typeof req.body[firstKey] === 'object') {
-//         console.log(' Detected wrapped data, unwrapping...');
-//         requestData = req.body[firstKey];
-//       }
-//     }
-    
-//     console.log(' Final request data:', JSON.stringify(requestData, null, 2));
-    
-//     const {
-//       caption: title,
-//       description,
-//       address,
-//       contact,
-//       urgencyLevel = 'Medium',
-//       latitude,
-//       longitude
-//     } = requestData;
-
-//     console.log(' Extracted fields:');
-//     console.log('  - title:', title);
-//     console.log('  - description:', description);
-//     console.log('  - address:', address);
-//     console.log('  - contact:', contact);
-//     console.log('  - urgencyLevel:', urgencyLevel);
-//     console.log('  - latitude:', latitude);
-//     console.log('  - longitude:', longitude);
-//     console.log('  - user:', req.user);
-
-//     // Validation
-//     if (!title || !description || !address || !contact) {
-//       console.log('  Validation failed - missing required fields');
-//       return res.status(400).json({ 
-//         error: 'Missing required fields: title, description, address, contact',
-//         received: { title: !!title, description: !!description, address: !!address, contact: !!contact }
-//       });
-//     }
-
-//     if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
-//       console.log('  Validation failed - invalid coordinates');
-//       return res.status(400).json({ 
-//         error: 'Invalid location coordinates',
-//         received: { latitude, longitude }
-//       });
-//     }
-
-//     const validUrgencyLevels = ['Low', 'Medium', 'High', 'Urgent'];
-//     if (!validUrgencyLevels.includes(urgencyLevel)) {
-//       console.log('  Validation failed - invalid urgency level');
-//       return res.status(400).json({ 
-//         error: 'Invalid urgency level. Must be: Low, Medium, High, or Urgent',
-//         received: urgencyLevel
-//       });
-//     }
-
-//     let newRequest;
-
-//     if (databaseConnected) {
-//       try {
-//         console.log(' Creating request in database...');
-//         console.log(' User info:', { id: req.user.id, name: req.user.name, email: req.user.email });
-        
-//         newRequest = await db.createRequest({
-//           title,
-//           description,
-//           latitude: parseFloat(latitude),
-//           longitude: parseFloat(longitude),
-//           contact,
-//           urgencyLevel,
-//           authorId: req.user.id,
-//           authorName: req.user.name
-//         });
-//         console.log('  Request created in database with ID:', newRequest.id);
-        
-//         // Verify the request was saved
-//         try {
-//           const verifyRequests = await db.getActiveRequests();
-//           const foundRequest = verifyRequests.find(r => r.id.toString() === newRequest.id.toString());
-//           if (foundRequest) {
-//             console.log('Request verified in database');
-//           } else {
-//             console.log('Request not found in verification check');
-//           }
-//         } catch (verifyError) {
-//           console.log(' Could not verify request creation:', verifyError.message);
-//         }
-        
-//       } catch (dbError) {
-//         console.log('  Database create failed:', dbError.message);
-//         console.log(' Falling back to in-memory storage');
-        
-//         newRequest = {
-//           id: Date.now().toString(),
-//           title,
-//           description,
-//           latitude: parseFloat(latitude),
-//           longitude: parseFloat(longitude),
-//           contact,
-//           urgencyLevel,
-//           status: 'Open',
-//           createdAt: new Date(),
-//           updatedAt: new Date(),
-//           authorId: req.user.id,
-//           authorName: req.user.name,
-//           helpersCount: 0,
-//           helpers: []
-//         };
-//         fallbackRequests.push(newRequest);
-//         databaseConnected = false;
-//       }
-//     } else {
-//       console.log('  Using fallback in-memory storage');
-//       newRequest = {
-//         id: Date.now().toString(),
-//         title,
-//         description,
-//         latitude: parseFloat(latitude),
-//         longitude: parseFloat(longitude),
-//         contact,
-//         urgencyLevel,
-//         status: 'Open',
-//         createdAt: new Date(),
-//         updatedAt: new Date(),
-//         authorId: req.user.id,
-//         authorName: req.user.name,
-//         helpersCount: 0,
-//         helpers: []
-//       };
-//       fallbackRequests.push(newRequest);
-//     }
-
-//     console.log(' Request created successfully with ID:', newRequest.id);
-//     console.log('Total requests now:', databaseConnected ? 'In database' : fallbackRequests.length);
-//     console.log(' === END CREATE REQUEST DEBUG ===\n');
-
-//     res.status(201).json({
-//       message: 'Request created successfully',
-//       request: newRequest,
-//       database_used: databaseConnected
-//     });
-
-//   } catch (error) {
-//     console.error('  Create error:', error);
-//     console.error('  Error stack:', error.stack);
-//     res.status(500).json({ 
-//       error: 'Failed to create request',
-//       details: error.message 
-//     });
-//   }
-// });
 
 // POST /api/requests/:id/offer-help - Offer help for a request
 app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => {
@@ -1523,46 +1362,44 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
   }
 });
 
-// AI analysis
+// Integrate AI
 app.post('/api/create', authenticateToken, async (req, res) => {
   try {
-    console.log('CREATE REQUEST WITH AI');
+    console.log('📝 Creating new help request...');
+    console.log('Request body:', req.body);
     
-    let requestData = req.body;
-    if (req.body && typeof req.body === 'object' && Object.keys(req.body).length === 1) {
-      const firstKey = Object.keys(req.body)[0];
-      if (typeof req.body[firstKey] === 'object') {
-        requestData = req.body[firstKey];
-      }
-    }
+    const { title, description, latitude, longitude, contact, urgencyLevel } = req.body;
     
-    const {
-      caption: title,
-      description,
-      address,
-      contact,
-      urgencyLevel = 'Medium',
-      latitude,
-      longitude
-    } = requestData;
-
-    if (!title || !description || !address || !contact) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // AI ANALYSIS - ADD THIS IF MISSING
-    console.log('Running AI categorization...');
-    const aiAnalysis = await aiService.categorizeRequest(title, description, urgencyLevel);
-    console.log('AI Result:', JSON.stringify(aiAnalysis));
-    
-    if (aiAnalysis.safetyCheck === 'flagged') {
-      return res.status(400).json({
-        error: 'Request could not be created',
-        reason: 'Content does not meet community guidelines'
+    // Validation
+    if (!title || !description || !latitude || !longitude || !contact) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        details: 'Title, description, location, and contact are required'
       });
     }
 
-    // Create request WITH AI fields
+    // SAFETY CHECK FIRST
+    console.log('Performing safety check...');
+    const safetyResult = await aiService.performSafetyCheck(title, description);
+    
+    if (!safetyResult.isSafe) {
+      console.log('Request flagged as unsafe:', safetyResult.flaggedCategory);
+      return res.status(400).json({
+        error: 'Request flagged',
+        flagged: true,
+        category: safetyResult.flaggedCategory,
+        reason: safetyResult.reason,
+        severity: safetyResult.severity
+      });
+    }
+    console.log('Safety check passed');
+
+    // AI categorization 
+    console.log('Categorizing with AI...');
+    const aiAnalysis = await aiService.categorizeRequest(title, description, urgencyLevel);
+    console.log('AI Analysis:', aiAnalysis);
+
+    // Create request in database 
     const newRequest = await db.createRequest({
       title,
       description,
@@ -1572,7 +1409,7 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       urgencyLevel,
       authorId: req.user.id,
       authorName: req.user.name,
-      // AI fields - MAKE SURE THESE ARE PASSED
+      // AI fields
       aiCategory: aiAnalysis.category,
       aiCategoryIcon: aiAnalysis.categoryIcon,
       aiCategoryName: aiAnalysis.categoryName,
@@ -1580,25 +1417,23 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       aiEstimatedTime: aiAnalysis.estimatedTime,
       aiTags: aiAnalysis.tags,
       aiSuggestedTitle: aiAnalysis.suggestedTitle,
-      aiSafetyCheck: aiAnalysis.safetyCheck,
-      aiSafetyReason: aiAnalysis.safetyReason
+      aiSafetyCheck: 'safe', 
+      aiSafetyReason: null
     });
 
-    await db.saveAIInsight(newRequest.id, 'categorization', aiAnalysis);
-
+    console.log('Request created successfully with ID:', newRequest.id);
+    
     res.status(201).json({
       message: 'Request created successfully',
-      request: newRequest,
-      aiAnalysis: {
-        category: aiAnalysis.categoryName,
-        icon: aiAnalysis.categoryIcon,
-        tags: aiAnalysis.tags
-      }
+      request: newRequest
     });
-    
+
   } catch (error) {
-    console.error('Create error:', error);
-    res.status(500).json({ error: 'Failed to create request' });
+    console.error('Create request error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create request',
+      message: error.message 
+    });
   }
 });
 
@@ -1622,6 +1457,40 @@ app.get('/api/ai/chat-history', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Chat history error:', error);
     res.status(500).json({ error: 'Failed to get chat history' });
+  }
+});
+
+// POST /api/rephrase - Improve request description with AI
+app.post('/api/rephrase', authenticateToken, async (req, res) => {
+  try {
+    console.log('Rephrasing request...');
+    
+    const { title, description } = req.body;
+    
+    if (!title || !description) {
+      return res.status(400).json({ 
+        error: 'Title and description are required' 
+      });
+    }
+
+    // Use existing improveRequest method
+    const improved = await aiService.improveRequest(title, description);
+    
+    console.log('Rephrased successfully');
+    res.json({
+      originalTitle: title,
+      originalDescription: description,
+      improvedTitle: improved.improvedTitle,
+      improvedDescription: improved.improvedDescription,
+      suggestions: improved.suggestions || []
+    });
+
+  } catch (error) {
+    console.error('Rephrase error:', error);
+    res.status(500).json({ 
+      error: 'Failed to rephrase',
+      message: error.message 
+    });
   }
 });
 

@@ -11,6 +11,7 @@ struct NetworkConfig {
     static let endpoints = (
         fetch: "/api/fetch",
         create: "/api/create",
+        rephrase: "/api/rephrase",
         offerHelp: "/api/requests/%@/offer-help",
         completeHelp: "/api/requests/%@/complete-help",
         confirmCompletion: "/api/requests/%@/confirm-completion",
@@ -19,7 +20,7 @@ struct NetworkConfig {
         userAchievements: "/api/user/achievements",
         userActivityTimeline: "/api/user/activity-timeline",
         userHistory: "/api/user/history",
-        health: "/health"
+        health: "/health",
     )
     
     // Helper method to construct offer help URL

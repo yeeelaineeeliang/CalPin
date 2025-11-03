@@ -150,6 +150,110 @@ class AIService {
   }
 
   /**
+ * Enhanced safety check with specific sensitive word detection
+ * @param {string} title - Request title
+ * @param {string} description - Request description
+ * @returns {Promise<Object>} Safety analysis with detailed reason
+ */
+  async performSafetyCheck(title, description) {
+    // First: Quick keyword pre-filter
+    const SENSITIVE_KEYWORDS = {
+      'personal_info': ['ssn', 'social security', 'credit card', 'bank account', 'password', 'address', 'phone number'],
+      'romantic': ['hook up', 'sex'],
+      'substances': ['drugs', 'adderall', 'xanax', 'pills'],
+      'academic_dishonesty': ['exam answers', 'do my homework', 'write my paper', 'take my exam', 'cheat', 'plagiarize'],
+      'financial': ['loan', 'borrow money', 'lend money', 'pay me', 'venmo', 'cash app'],
+      'illegal': ['fake id', 'steal', 'break in', 'hack']
+    };
+
+    const text = `${title} ${description}`.toLowerCase();
+    
+    // Check for sensitive keywords
+    for (const [category, keywords] of Object.entries(SENSITIVE_KEYWORDS)) {
+      for (const keyword of keywords) {
+        if (text.includes(keyword)) {
+          return {
+            isSafe: false,
+            flaggedCategory: category,
+            reason: this.getSafetyMessage(category),
+            keyword: keyword
+          };
+        }
+      }
+    }
+
+    // Second: AI-powered context check (for nuanced cases)
+    try {
+      const prompt = `Analyze this help request for safety and appropriateness for a student support app.
+
+  Title: ${title}
+  Description: ${description}
+
+  Check for:
+  1. Personal identifying information (SSN, addresses, private data)
+  2. Substance-related requests (alcohol, drugs, prescriptions)
+  3. Academic dishonesty (cheating, selling answers)
+  4. Financial transactions (loans, money requests)
+  5. Illegal activities
+  6. Harassment or inappropriate content
+
+  Respond with JSON:
+  {
+    "isSafe": true/false,
+    "flaggedCategory": "category_name" or null,
+    "reason": "Brief explanation for user (1 sentence)" or null,
+    "severity": "low|medium|high" or null
+  }
+
+  If safe, return { "isSafe": true, "flaggedCategory": null, "reason": null, "severity": null }
+  Respond ONLY with valid JSON.`;
+
+      const message = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 200,
+        messages: [{
+          role: 'user',
+          content: prompt
+        }]
+      });
+
+      const result = JSON.parse(message.content[0].text);
+      
+      if (!result.isSafe) {
+        return {
+          isSafe: false,
+          flaggedCategory: result.flaggedCategory,
+          reason: result.reason || 'This request violates our community guidelines.',
+          severity: result.severity || 'medium'
+        };
+      }
+
+      return { isSafe: true, flaggedCategory: null, reason: null };
+
+    } catch (error) {
+      console.error('AI safety check error:', error.message);
+      // On error, be conservative - use keyword results only
+      return { isSafe: true, flaggedCategory: null, reason: null };
+    }
+  }
+
+  /**
+   * Get user-friendly safety message for flagged category
+   */
+  getSafetyMessage(category) {
+    const messages = {
+      'personal_info': 'For your safety, please don\'t share personal information like addresses, SSN, or bank details.',
+      'substances': 'Requests involving alcohol, drugs, or prescriptions aren\'t allowed. Contact Tang Center for health needs.',
+      'academic_dishonesty': 'Academic integrity is important. We can\'t help with cheating. Visit the Student Learning Center for study help.',
+      'mental_health_crisis': 'This sounds serious. Please contact CAPS (510-642-9494) or Crisis Line (855-817-5667) for professional help.',
+      'financial': 'For safety reasons, we don\'t allow money lending or financial transactions between students.',
+      'illegal': 'This request appears to involve illegal activity and cannot be posted.'
+    };
+    
+    return messages[category] || 'This request violates our community guidelines.';
+  }
+
+  /**
    * Improve request title and description using Claude
    * @param {string} title - Original title
    * @param {string} description - Original description

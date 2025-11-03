@@ -421,6 +421,7 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     res.status(500).json({ error: 'Failed to offer help' });
   }
 });
+
 // Helper marks their help as complete
 app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) => {
   try {
@@ -549,6 +550,152 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
   } catch (error) {
     console.error('  Complete help error:', error);
     res.status(500).json({ error: 'Failed to complete help' });
+  }
+});
+
+// Get all helpers who offered help for a request
+app.get('/api/requests/:id/helpers', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const userId = req.user.id;
+
+    console.log('📋 Fetching helpers for request:', requestId);
+
+    if (!databaseConnected) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+
+    // Verify user is the request author
+    const requestCheck = await db.pool.query(
+      'SELECT author_id FROM help_requests WHERE id = $1',
+      [requestId]
+    );
+
+    if (requestCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found' });
+    }
+
+    if (requestCheck.rows[0].author_id !== userId) {
+      return res.status(403).json({ error: 'Only the request author can view helpers' });
+    }
+
+    const helpers = await db.getHelpersForRequest(requestId);
+    
+    console.log(`  Found ${helpers.length} helpers for request ${requestId}`);
+    
+    res.json({
+      helpers: helpers.map(h => ({
+        id: h.helper_id,
+        name: h.helper_name,
+        email: h.helper_email,
+        status: h.status,
+        offeredAt: h.created_at,
+        completedAt: h.completed_at
+      }))
+    });
+
+  } catch (error) {
+    console.error('❌ Get helpers error:', error);
+    res.status(500).json({ error: 'Failed to get helpers' });
+  }
+});
+
+// Requester accepts a specific helper
+app.post('/api/requests/:id/accept-helper', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const userId = req.user.id;
+    const { helperId } = req.body;
+
+    console.log('✅ Accepting helper - Request:', requestId, 'Helper:', helperId);
+
+    if (!helperId) {
+      return res.status(400).json({ error: 'Helper ID is required' });
+    }
+
+    if (!databaseConnected) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+
+    const updatedRequest = await db.acceptHelper(requestId, helperId, userId);
+    
+    console.log(`  Helper ${helperId} accepted for request ${requestId}`);
+    
+    res.json({
+      success: true,
+      message: 'Helper accepted successfully',
+      request: updatedRequest
+    });
+
+  } catch (error) {
+    console.error('❌ Accept helper error:', error);
+    if (error.message.includes('not found')) {
+      res.status(404).json({ error: error.message });
+    } else if (error.message.includes('Only the request author')) {
+      res.status(403).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to accept helper' });
+    }
+  }
+});
+// POST /api/requests/:id/complete - Requester marks request as completed
+app.post('/api/requests/:id/complete', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const userId = req.user.id;
+
+    console.log('🎯 Completing request:', requestId, 'by user:', req.user.email);
+
+    if (!databaseConnected) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+
+    const updatedRequest = await db.completeRequest(requestId, userId);
+    
+    console.log(`  Request ${requestId} marked as completed`);
+    
+    res.json({
+      success: true,
+      message: 'Request completed successfully',
+      request: updatedRequest
+    });
+
+  } catch (error) {
+    console.error('❌ Complete request error:', error);
+    if (error.message.includes('not found')) {
+      res.status(404).json({ error: error.message });
+    } else if (error.message.includes('Only the request author')) {
+      res.status(403).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to complete request' });
+    }
+  }
+});
+
+// Cancel a help offer
+app.post('/api/requests/:id/cancel-help', authenticateToken, async (req, res) => {
+  try {
+    const requestId = req.params.id;
+    const helperId = req.user.id;
+
+    console.log('Cancelling help offer - Request:', requestId, 'Helper:', helperId);
+
+    if (!databaseConnected) {
+      return res.status(503).json({ error: 'Database not available' });
+    }
+
+    await db.cancelHelpOffer(requestId, helperId);
+    
+    console.log(`  Help offer cancelled for request ${requestId} by helper ${helperId}`);
+    
+    res.json({
+      success: true,
+      message: 'Help offer cancelled successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Cancel help error:', error);
+    res.status(500).json({ error: 'Failed to cancel help offer' });
   }
 });
 

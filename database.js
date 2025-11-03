@@ -96,6 +96,9 @@ async function initDatabase() {
     // Migrate help_offers columns
     await migrateHelpOffersColumns();
     
+    // Migrate accepted_helper_id column
+    await migrateAcceptedHelperColumn();
+    
     // Now migrate AI columns to help_requests
     await migrateAIColumns();
     
@@ -148,6 +151,32 @@ async function migrateHelpOffersColumns() {
     console.log('help_offers columns migrated successfully');
   } catch (error) {
     console.error('help_offers column migration error:', error);
+    throw error;
+  }
+}
+
+// Migrate accepted_helper_id column
+async function migrateAcceptedHelperColumn() {
+  try {
+    console.log('Running accepted_helper_id column migration...');
+    
+    const check = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='help_requests' AND column_name='accepted_helper_id'
+    `);
+    
+    if (check.rows.length === 0) {
+      await pool.query(`
+        ALTER TABLE help_requests 
+        ADD COLUMN accepted_helper_id VARCHAR(255) REFERENCES users(id)
+      `);
+      console.log('Added accepted_helper_id column to help_requests');
+    }
+    
+    console.log('accepted_helper_id column migrated successfully');
+  } catch (error) {
+    console.error('accepted_helper_id column migration error:', error);
     throw error;
   }
 }
@@ -379,6 +408,173 @@ const db = {
       [userId, limit]
     );
     return result.rows.reverse();
+  },
+
+  // Get all helpers for a request
+  async getHelpersForRequest(requestId) {
+    const result = await pool.query(
+      `SELECT ho.*, u.email as helper_email
+       FROM help_offers ho
+       JOIN users u ON ho.helper_id = u.id
+       WHERE ho.request_id = $1
+       ORDER BY ho.created_at ASC`,
+      [requestId]
+    );
+    return result.rows;
+  },
+
+  // Accept a helper for a request
+  async acceptHelper(requestId, helperId, requestAuthorId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Verify requester is the author
+      const requestCheck = await client.query(
+        'SELECT author_id FROM help_requests WHERE id = $1',
+        [requestId]
+      );
+      
+      if (requestCheck.rows.length === 0) {
+        throw new Error('Request not found');
+      }
+      
+      if (requestCheck.rows[0].author_id !== requestAuthorId) {
+        throw new Error('Only the request author can accept helpers');
+      }
+      
+      // Update the help offer to accepted
+      await client.query(
+        `UPDATE help_offers 
+         SET status = 'accepted'
+         WHERE request_id = $1 AND helper_id = $2`,
+        [requestId, helperId]
+      );
+      
+      // Reject all other offers
+      await client.query(
+        `UPDATE help_offers 
+         SET status = 'rejected'
+         WHERE request_id = $1 AND helper_id != $2 AND status = 'active'`,
+        [requestId, helperId]
+      );
+      
+      // Update request status to In Progress and set accepted helper
+      await client.query(
+        `UPDATE help_requests 
+         SET status = 'In Progress',
+             accepted_helper_id = $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [requestId, helperId]
+      );
+      
+      await client.query('COMMIT');
+      
+      const result = await client.query(
+        'SELECT * FROM help_requests WHERE id = $1',
+        [requestId]
+      );
+      
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Complete a request
+  async completeRequest(requestId, requestAuthorId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Verify requester is the author
+      const requestCheck = await client.query(
+        'SELECT author_id, accepted_helper_id FROM help_requests WHERE id = $1',
+        [requestId]
+      );
+      
+      if (requestCheck.rows.length === 0) {
+        throw new Error('Request not found');
+      }
+      
+      if (requestCheck.rows[0].author_id !== requestAuthorId) {
+        throw new Error('Only the request author can complete the request');
+      }
+      
+      const acceptedHelperId = requestCheck.rows[0].accepted_helper_id;
+      
+      // Update request status to Completed
+      await client.query(
+        `UPDATE help_requests 
+         SET status = 'Completed',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [requestId]
+      );
+      
+      // Mark the accepted helper's offer as completed
+      if (acceptedHelperId) {
+        await client.query(
+          `UPDATE help_offers 
+           SET status = 'completed',
+               completed_at = NOW()
+           WHERE request_id = $1 AND helper_id = $2`,
+          [requestId, acceptedHelperId]
+        );
+      }
+      
+      await client.query('COMMIT');
+      
+      const result = await client.query(
+        'SELECT * FROM help_requests WHERE id = $1',
+        [requestId]
+      );
+      
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  // Cancel a help offer
+  async cancelHelpOffer(requestId, helperId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Update help offer status to cancelled
+      await client.query(
+        `UPDATE help_offers 
+         SET status = 'cancelled'
+         WHERE request_id = $1 AND helper_id = $2`,
+        [requestId, helperId]
+      );
+      
+      // Decrement helpers_count
+      await client.query(
+        `UPDATE help_requests 
+         SET helpers_count = GREATEST(0, helpers_count - 1),
+             updated_at = NOW()
+         WHERE id = $1`,
+        [requestId]
+      );
+      
+      await client.query('COMMIT');
+      
+      return { success: true };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 };
 

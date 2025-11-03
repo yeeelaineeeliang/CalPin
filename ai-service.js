@@ -42,77 +42,60 @@ class AIService {
    * @returns {Promise<Object>} Category analysis
    */
   async categorizeRequest(title, description, urgencyLevel) {
-    try {
-      const prompt = `You are analyzing a help request from a UC Berkeley student. Categorize this request correctly.
+  try {
+    const prompt = `You are analyzing a help request from a UC Berkeley student. Categorize this request and provide helpful insights.
 
-    Request Title: ${title}
-    Description: ${description}
-    User-Selected Urgency: ${urgencyLevel}
+Request Title: ${title}
+Description: ${description}
+User-Selected Urgency: ${urgencyLevel}
 
-    Available categories:
-    ${this.categories.map(c => `- ${c.name} (${c.id})`).join('\n')}
+Available categories:
+${this.categories.map(c => `- ${c.name} (${c.id}): For requests about ${c.keywords.slice(0, 5).join(', ')}`).join('\n')}
 
-    EXAMPLES:
-    - "Need help with physics homework" → academic
-    - "Laptop won't boot, need tech help" → technical  
-    - "Moving furniture, need strong people" → moving
-    - "Ride to airport tomorrow morning" → transportation
-    - "Feeling lonely, want to grab coffee" → social
+Analyze this request and respond with a JSON object containing:
+1. "category": The most appropriate category ID from the list above
+2. "suggestedTitle": A clearer, more descriptive title (if needed, otherwise same as original)
+3. "estimatedTime": Estimated time needed in minutes (just the number)
+4. "detectedUrgency": Your assessment of true urgency: "Low", "Medium", "High", or "Urgent"
+5. "tags": Array of 2-4 relevant tags
+6. "safetyCheck": "safe" or "flagged" - flag if request seems inappropriate, unsafe, or violates community guidelines
+7. "safetyReason": If flagged, explain why briefly
 
-    RULES:
-    1. If request mentions multiple categories, choose the PRIMARY need
-    2. Only use "emergency" for true emergencies (safety, health crisis)
-    3. Flag as unsafe if: spam, harassment, illegal activity, personal info requests
-    4. Estimated time should be realistic (5-120 minutes typically)
+CRITICAL: Respond ONLY with valid JSON, no markdown code blocks or other text.`;
 
-    Respond ONLY with valid JSON containing:
-    {
-      "category": "category_id",
-      "suggestedTitle": "improved title if needed, otherwise original",
-      "estimatedTime": 30,
-      "detectedUrgency": "Low|Medium|High|Emergency",
-      "tags": ["tag1", "tag2", "tag3"],
-      "safetyCheck": "safe|flagged",
-      "safetyReason": "reason if flagged, otherwise null"
-    }`;
+    const message = await this.client.messages.create({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }]
+    });
 
-      const message = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
-      });
-
-      const responseText = message.content[0].text;
-      const analysis = JSON.parse(responseText);
-
-      // Validate required fields
-      if (!analysis.category || !this.categories.find(c => c.id === analysis.category)) {
-        console.error('Invalid category:', analysis.category);
-        throw new Error('Invalid category from AI');
-      }
-      
-      // Set defaults for missing fields
-      analysis.suggestedTitle = analysis.suggestedTitle || title;
-      analysis.estimatedTime = analysis.estimatedTime || 30;
-      analysis.detectedUrgency = analysis.detectedUrgency || urgencyLevel;
-      analysis.tags = analysis.tags || [];
-      analysis.safetyCheck = analysis.safetyCheck || 'safe';
-      
-      // Add category metadata
-      const categoryInfo = this.categories.find(c => c.id === analysis.category);
-      analysis.categoryIcon = categoryInfo.icon;
-      analysis.categoryName = categoryInfo.name;
-      
-      return analysis;
-    } catch (error) {
-      console.error('AI categorization error:', error.message);
-      // Fallback to simple keyword matching
-      return this.fallbackCategorization(title, description, urgencyLevel);
+    let responseText = message.content[0].text.trim();
+    
+    // Remove markdown code blocks if present
+    if (responseText.startsWith('```json')) {
+      responseText = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (responseText.startsWith('```')) {
+      responseText = responseText.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
+
+    const analysis = JSON.parse(responseText);
+
+    // Add category metadata
+    const categoryInfo = this.categories.find(c => c.id === analysis.category);
+    analysis.categoryIcon = categoryInfo?.icon || '📌';
+    analysis.categoryName = categoryInfo?.name || 'Other';
+
+    console.log('Request categorized:', analysis);
+    return analysis;
+
+  } catch (error) {
+    console.error('AI categorization error:', error.message);
+    return this.fallbackCategorization(title, description, urgencyLevel);
   }
+}
 
   /**
    * Fallback categorization using simple keyword matching
@@ -260,8 +243,8 @@ class AIService {
    * @returns {Promise<Object>} Improved request
    */
   async improveRequest(title, description) {
-    try {
-      const prompt = `You are helping a UC Berkeley student write a clearer help request, including grammar checks, refine the sentences. Make their request more effective while keeping their original intent.
+  try {
+    const prompt = `You are helping a UC Berkeley student write a clearer help request. Make their request more effective while keeping their original intent.
 
 Original Title: ${title}
 Original Description: ${description}
@@ -272,36 +255,49 @@ Improve this request by:
 3. Keeping the student's voice and urgency
 4. Adding any helpful context or questions that helpers might need
 
-Respond with JSON:
+CRITICAL: Respond with ONLY valid JSON. Do not use markdown code blocks. Do not add any text before or after the JSON.
+
 {
   "improvedTitle": "clear concise title",
   "improvedDescription": "well-organized description",
-  "suggestions": ["tip 1", "tip 2"] // 2-3 tips for making even better requests
-}
+  "suggestions": ["tip 1", "tip 2"]
+}`;
 
-Respond ONLY with valid JSON.`;
+    const message = await this.client.messages.create({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }]
+    });
 
-      const message = await this.client.messages.create({
-        model: this.model,
-        max_tokens: this.maxTokens,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
-      });
-
-      const responseText = message.content[0].text;
-      return JSON.parse(responseText);
-
-    } catch (error) {
-      console.error('AI improvement error:', error.message);
-      return {
-        improvedTitle: title,
-        improvedDescription: description,
-        suggestions: ['Be specific about what you need', 'Include location details', 'Mention time constraints']
-      };
+    let responseText = message.content[0].text.trim();
+    
+    // Remove markdown code blocks if present
+    if (responseText.startsWith('```json')) {
+      responseText = responseText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (responseText.startsWith('```')) {
+      responseText = responseText.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
+    
+    const result = JSON.parse(responseText);
+    
+    return {
+      improvedTitle: result.improvedTitle || title,
+      improvedDescription: result.improvedDescription || description,
+      suggestions: result.suggestions || []
+    };
+
+  } catch (error) {
+    console.error('AI improvement error:', error.message);
+    return {
+      improvedTitle: title,
+      improvedDescription: description,
+      suggestions: ['Be specific about what you need', 'Include location details', 'Mention time constraints']
+    };
   }
+}
 
   /**
    * Generate smart notification message for potential helpers

@@ -510,7 +510,7 @@ const db = {
       // Update request status to Completed
       await client.query(
         `UPDATE help_requests 
-         SET status = 'Completed',
+         SET status = 'completed',
              updated_at = NOW()
          WHERE id = $1`,
         [requestId]

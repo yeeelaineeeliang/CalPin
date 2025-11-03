@@ -54,7 +54,7 @@ ${this.categories.map(c => `- ${c.name} (${c.id}): For requests about ${c.keywor
 
 Analyze this request and respond with a JSON object containing:
 1. "category": The most appropriate category ID from the list above
-2. "suggestedTitle": A clearer, more descriptive title (if needed, otherwise same as original)
+2. "suggestedTitle": A clearer, more concise title (if needed, otherwise same as original)
 3. "estimatedTime": Estimated time needed in minutes (just the number)
 4. "detectedUrgency": Your assessment of true urgency: "Low", "Medium", "High", or "Urgent"
 5. "tags": Array of 2-4 relevant tags
@@ -250,8 +250,8 @@ Original Title: ${title}
 Original Description: ${description}
 
 Improve this request by:
-1. Making the title clear and specific (max 60 characters)
-2. Organizing the description with clear details
+1. Making the title clear and specific (max 50 characters)
+2. Organizing the description with clear details (max 50 words)
 3. Keeping the student's voice and urgency
 4. Adding any helpful context or questions that helpers might need
 

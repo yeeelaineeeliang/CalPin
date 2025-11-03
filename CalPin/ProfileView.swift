@@ -226,7 +226,7 @@ struct ProfileView: View {
                                     .fill(californiaGold)
                                     .frame(width: 32, height: 32)
                                 
-                                Text("🔥")
+                                Text("ðŸ”¥")
                                     .font(.system(size: 16))
                             }
                         }
@@ -501,7 +501,7 @@ struct ProfileView: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("🔥")
+                    Text("ðŸ”¥")
                         .font(.title)
                     Text("\(streak) Week\(streak == 1 ? "" : "s")")
                         .font(.title2)
@@ -594,7 +594,7 @@ struct ProfileView: View {
     
     private func fetchUserStats() {
         guard !userSession.token.isEmpty else {
-            print("❌ No token available for stats fetch")
+            print("âŒ No token available for stats fetch")
             isLoadingStats = false
             return
         }
@@ -615,11 +615,11 @@ struct ProfileView: View {
                 
                 switch response.result {
                 case .success(let stats):
-                    print("✅ User stats fetched successfully")
+                    print("âœ… User stats fetched successfully")
                     self.userStats = stats
                 case .failure(let error):
-                    print("❌ Failed to fetch user stats: \(error)")
-                    print("❌ Response data: \(String(data: response.data ?? Data(), encoding: .utf8) ?? "No data")")
+                    print("âŒ Failed to fetch user stats: \(error)")
+                    print("âŒ Response data: \(String(data: response.data ?? Data(), encoding: .utf8) ?? "No data")")
                 }
             }
         }
@@ -628,7 +628,7 @@ struct ProfileView: View {
     @MainActor
     private func fetchUserStatsAsync() async {
         guard !userSession.token.isEmpty else {
-            print("❌ No token available for stats fetch")
+            print("âŒ No token available for stats fetch")
             isLoadingStats = false
             return
         }
@@ -647,10 +647,10 @@ struct ProfileView: View {
             
             self.userStats = stats
             self.isLoadingStats = false
-            print("✅ User stats fetched successfully")
+            print("âœ… User stats fetched successfully")
             
         } catch {
-            print("❌ Failed to fetch user stats: \(error)")
+            print("âŒ Failed to fetch user stats: \(error)")
             isLoadingStats = false
         }
     }
@@ -663,19 +663,23 @@ struct ProfileView: View {
             "Content-Type": "application/json"
         ]
         
+        // Create decoder with ISO8601 date strategy
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
         AF.request(
             "\(NetworkConfig.baseURL)/api/user/achievements",
             method: .get,
             headers: headers
         )
-        .responseDecodable(of: [Achievement].self) { response in
+        .responseDecodable(of: [Achievement].self, decoder: decoder) { response in
             DispatchQueue.main.async {
                 switch response.result {
                 case .success(let achievements):
-                    print("✅ Achievements fetched successfully: \(achievements.count)")
+                    print("âœ… Achievements fetched successfully: \(achievements.count)")
                     self.achievements = achievements
                 case .failure(let error):
-                    print("❌ Failed to fetch achievements: \(error)")
+                    print("âŒ Failed to fetch achievements: \(error)")
                 }
             }
         }
@@ -690,18 +694,22 @@ struct ProfileView: View {
             "Content-Type": "application/json"
         ]
         
+        // Create decoder with ISO8601 date strategy
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
         do {
             let achievements = try await AF.request(
                 "\(NetworkConfig.baseURL)/api/user/achievements",
                 method: .get,
                 headers: headers
-            ).serializingDecodable([Achievement].self).value
+            ).serializingDecodable([Achievement].self, decoder: decoder).value
             
             self.achievements = achievements
-            print("✅ Achievements fetched successfully: \(achievements.count)")
+            print("âœ… Achievements fetched successfully: \(achievements.count)")
             
         } catch {
-            print("❌ Failed to fetch achievements: \(error)")
+            print("âŒ Failed to fetch achievements: \(error)")
         }
     }
     
@@ -722,10 +730,10 @@ struct ProfileView: View {
             DispatchQueue.main.async {
                 switch response.result {
                 case .success(let timeline):
-                    print("✅ Activity timeline fetched successfully: \(timeline.count) items")
+                    print("âœ… Activity timeline fetched successfully: \(timeline.count) items")
                     self.activityTimeline = timeline
                 case .failure(let error):
-                    print("❌ Failed to fetch activity timeline: \(error)")
+                    print("âŒ Failed to fetch activity timeline: \(error)")
                 }
             }
         }
@@ -748,10 +756,10 @@ struct ProfileView: View {
             ).serializingDecodable([ActivityTimelineItem].self).value
             
             self.activityTimeline = timeline
-            print("✅ Activity timeline fetched successfully: \(timeline.count) items")
+            print("âœ… Activity timeline fetched successfully: \(timeline.count) items")
             
         } catch {
-            print("❌ Failed to fetch activity timeline: \(error)")
+            print("âŒ Failed to fetch activity timeline: \(error)")
         }
     }
 }
@@ -969,5 +977,3 @@ struct ActivityRowView: View {
         .padding(.vertical, 8)
     }
 }
-
-

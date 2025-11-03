@@ -410,51 +410,30 @@ struct RequestView: View {
         
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        print("Sending rephrase request...")
-        
         URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 isRephrasing = false
                 
-                if let error = error {
-                    print("Rephrase network error:", error.localizedDescription)
-                    return
-                }
-                
-                if let httpResponse = response as? HTTPURLResponse {
-                    print("Rephrase status code:", httpResponse.statusCode)
-                    
-                    if let data = data,
-                       let responseString = String(data: data, encoding: .utf8) {
-                        print("Rephrase response:", responseString)
-                    }
-                }
-                
                 guard let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    print("Failed to parse rephrase response")
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let improvedDesc = json["improvedDescription"] as? String else {
                     return
                 }
                 
-                if let improvedDesc = json["improvedDescription"] as? String,
-                   improvedDesc != description {
+                withAnimation {
+                    description = improvedDesc
+                    showRephraseSuccess = true
+                }
+                
+                if let improvedTitle = json["improvedTitle"] as? String,
+                   improvedTitle.count > caption.count {
+                    caption = improvedTitle
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                     withAnimation {
-                        description = improvedDesc
-                        showRephraseSuccess = true
+                        showRephraseSuccess = false
                     }
-                    
-                    if let improvedTitle = json["improvedTitle"] as? String,
-                       improvedTitle.count > caption.count {
-                        caption = improvedTitle
-                    }
-                    
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        withAnimation {
-                            showRephraseSuccess = false
-                        }
-                    }
-                } else {
-                    print("No improvement made or same text returned")
                 }
             }
         }.resume()

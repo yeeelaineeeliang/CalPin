@@ -71,7 +71,7 @@ extension LocationManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         
-        print("📍 Location updated: \(location.coordinate)")
+        print("Location updated: \(location.coordinate)")
         
         DispatchQueue.main.async {
             self.userLocation = location.coordinate
@@ -85,7 +85,7 @@ extension LocationManager: CLLocationManagerDelegate {
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("❌ Location manager failed with error: \(error.localizedDescription)")
+        print("Location manager failed with error: \(error.localizedDescription)")
         
         if let completion = locationCompletion {
             completion(.failure(error))
@@ -123,7 +123,7 @@ func createPlace(from json: [String: Any]) -> Place? {
         let description = json["description"] as? String,
         let contact = json["contact"] as? String
     else {
-        print("❌ Failed to parse place - missing required fields")
+        print("Failed to parse place - missing required fields")
         print("JSON: \(json)")
         return nil
     }
@@ -136,7 +136,7 @@ func createPlace(from json: [String: Any]) -> Place? {
     } else if let idInt = json["id"] as? Int {
         id = String(idInt)
     } else {
-        print("❌ No valid ID found in JSON")
+        print("No valid ID found in JSON")
         return nil
     }
     
@@ -788,8 +788,6 @@ class observer: ObservableObject {
                     self?.isLoading = false
                     self?.lastRefresh = Date()
                     
-                    print("📊 Response status: \(response.response?.statusCode ?? 0)")
-                    
                     switch response.result {
                     case .success(let data):
                         // Print raw JSON for debugging
@@ -813,41 +811,41 @@ class observer: ObservableObject {
                             }
                             
                         } catch let DecodingError.keyNotFound(key, context) {
-                            print("❌ Decoding error - Key '\(key.stringValue)' not found")
-                            print("   Context: \(context.debugDescription)")
-                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            print("Decoding error - Key '\(key.stringValue)' not found")
+                            print("Context: \(context.debugDescription)")
+                            print("CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
                             self?.errorMessage = "Missing key: \(key.stringValue)"
                             
                         } catch let DecodingError.typeMismatch(type, context) {
-                            print("❌ Decoding error - Type mismatch for type \(type)")
-                            print("   Context: \(context.debugDescription)")
-                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            print("Decoding error - Type mismatch for type \(type)")
+                            print("Context: \(context.debugDescription)")
+                            print("CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
                             self?.errorMessage = "Type mismatch: \(type)"
                             
                         } catch let DecodingError.valueNotFound(type, context) {
-                            print("❌ Decoding error - Value of type \(type) not found")
-                            print("   Context: \(context.debugDescription)")
-                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            print("Decoding error - Value of type \(type) not found")
+                            print("Context: \(context.debugDescription)")
+                            print("CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
                             self?.errorMessage = "Value not found: \(type)"
                             
                         } catch let DecodingError.dataCorrupted(context) {
-                            print("❌ Decoding error - Data corrupted")
-                            print("   Context: \(context.debugDescription)")
-                            print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+                            print("Decoding error - Data corrupted")
+                            print("Context: \(context.debugDescription)")
+                            print("CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
                             self?.errorMessage = "Data corrupted"
                             
                         } catch {
-                            print("❌ Unknown decoding error: \(error)")
-                            print("   Error description: \(error.localizedDescription)")
+                            print("Unknown decoding error: \(error)")
+                            print("Error description: \(error.localizedDescription)")
                             self?.errorMessage = error.localizedDescription
                         }
                         
                         completion()
                         
                     case .failure(let error):
-                        print("❌ Network error: \(error.localizedDescription)")
+                        print("Network error: \(error.localizedDescription)")
                         if let data = response.data, let errorString = String(data: data, encoding: .utf8) {
-                            print("❌ Server response: \(errorString)")
+                            print("Server response: \(errorString)")
                         }
                         self?.errorMessage = error.localizedDescription
                         completion()

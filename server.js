@@ -253,7 +253,7 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }
         
       } catch (dbError) {
-        console.log('  Database fetch failed:', dbError.message);
+        console.log('Database fetch failed:', dbError.message);
         console.log('Falling back to in-memory storage');
         const now = new Date();
         activeRequests = fallbackRequests.filter(request => {
@@ -265,7 +265,7 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }));
       }
     } else {
-      console.log(' Using fallback in-memory storage');
+      console.log('Using fallback in-memory storage');
       const now = new Date();
       activeRequests = fallbackRequests.filter(request => {
         const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -429,7 +429,7 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
     const helperId = req.user.id;
     const helperName = req.user.name;
 
-    console.log('  Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
+    console.log('Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
 
     if (databaseConnected) {
       try {
@@ -491,7 +491,7 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
           
           await client.query('COMMIT');
           
-          console.log(`  Helper ${helperId} marked help as complete for request ${requestId}`);
+          console.log(`Helper ${helperId} marked help as complete for request ${requestId}`);
           
           res.json({
             success: true,
@@ -644,8 +644,14 @@ app.post('/api/requests/:id/complete', authenticateToken, async (req, res) => {
     const requestId = req.params.id;
     const userId = req.user.id;
 
-    console.log('🎯 Completing request:', requestId, 'by user:', req.user.email);
+    console.log('Completing request:', requestId, 'by user:', req.user.email);
 
+    if (databaseConnected) {
+      const beforeResult = await db.pool.query('SELECT status FROM help_requests WHERE id = $1', [requestId]);
+      if (beforeResult.rows.length > 0) {
+        console.log('Status BEFORE:', beforeResult.rows[0].status);
+      }
+    }
     if (!databaseConnected) {
       return res.status(503).json({ error: 'Database not available' });
     }
@@ -792,7 +798,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     const { status } = req.body;
     const userId = req.user.id;
 
-    console.log('📝 Updating request status:', requestId, 'to:', status, 'by:', req.user.email);
+    console.log('Updating request status:', requestId, 'to:', status, 'by:', req.user.email);
 
     if (!['Open', 'In Progress', 'Completed', 'Cancelled'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
@@ -805,7 +811,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
           return res.status(404).json({ error: 'Request not found or unauthorized' });
         }
         
-        console.log('  Request status updated in database');
+        console.log('Request status updated in database');
         res.json({ 
           success: true, 
           message: 'Status updated successfully',
@@ -814,7 +820,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
         });
         return;
       } catch (dbError) {
-        console.log('  Database status update failed:', dbError.message);
+        console.log('Database status update failed:', dbError.message);
       }
     }
 
@@ -826,7 +832,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     fallbackRequests[requestIndex].status = status;
     fallbackRequests[requestIndex].updatedAt = new Date();
     
-    console.log('  Request status updated using fallback storage');
+    console.log('Request status updated using fallback storage');
     res.json({ 
       success: true, 
       message: 'Status updated successfully',
@@ -835,7 +841,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('  Update status error:', error);
+    console.error('Update status error:', error);
     res.status(500).json({ error: 'Failed to update status' });
   }
 });
@@ -844,10 +850,10 @@ app.get('/api/debug/my-stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     
-    console.log('🔍 DEBUG MY STATS');
-    console.log('🔍 User ID:', userId);
-    console.log('🔍 User ID type:', typeof userId);
-    console.log('🔍 User email:', req.user.email);
+    console.log('DEBUG MY STATS');
+    console.log('User ID:', userId);
+    console.log('User ID type:', typeof userId);
+    console.log('User email:', req.user.email);
     
     if (!databaseConnected) {
       return res.json({ error: 'Database not connected' });

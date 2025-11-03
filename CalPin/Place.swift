@@ -106,12 +106,12 @@ enum AICategory: String, Codable, CaseIterable {
         switch self {
         case .academic: return "📚"
         case .technical: return "💻"
-        case .social: return "🤝"
+        case .social: return "🥳"
         case .transportation: return "🚗"
         case .moving: return "📦"
         case .food: return "🍕"
         case .health: return "🏥"
-        case .emergency: return "🚨"
+        case .emergency: return "🚑"
         case .other: return "📌"
         }
     }
@@ -148,6 +148,7 @@ struct Place: Identifiable, Codable, Equatable {
     let authorName: String
     let helpersCount: Int
     let isCurrentUserHelping: Bool
+    let acceptedHelperId: String?
     
     // AI-generated fields
     let aiCategory: AICategory?
@@ -160,8 +161,6 @@ struct Place: Identifiable, Codable, Equatable {
     let aiSafetyCheck: String?
     let aiSafetyReason: String?
     
-    // MARK: - CodingKeys
-    // FIX: Map snake_case server keys to camelCase Swift properties
     enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -171,14 +170,15 @@ struct Place: Identifiable, Codable, Equatable {
         case contact
         case distance
         case duration
-        case urgencyLevel = "urgency_level"  
+        case urgencyLevel = "urgency_level"
         case status
-        case createdAt = "created_at"        
-        case updatedAt = "updated_at"        
-        case authorId = "author_id"          
-        case authorName = "author_name"      
-        case helpersCount = "helpers_count"  
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case authorId = "author_id"
+        case authorName = "author_name"
+        case helpersCount = "helpers_count"
         case isCurrentUserHelping = "isCurrentUserHelping"
+        case acceptedHelperId = "accepted_helper_id"
         case aiCategory = "ai_category"
         case aiCategoryName = "ai_category_name"
         case aiCategoryIcon = "ai_category_icon"
@@ -232,7 +232,7 @@ struct Place: Identifiable, Codable, Equatable {
         }
     }
     
-    // MARK: - Initializer
+    // Initializer
     init(id: String,
          title: String,
          coordinate: CLLocationCoordinate2D,
@@ -248,6 +248,7 @@ struct Place: Identifiable, Codable, Equatable {
          authorName: String = "",
          helpersCount: Int = 0,
          isCurrentUserHelping: Bool = false,
+         acceptedHelperId: String? = nil,
          aiCategory: AICategory? = nil,
          aiCategoryName: String? = nil,
          aiCategoryIcon: String? = nil,
@@ -272,6 +273,7 @@ struct Place: Identifiable, Codable, Equatable {
         self.authorName = authorName
         self.helpersCount = helpersCount
         self.isCurrentUserHelping = isCurrentUserHelping
+        self.acceptedHelperId = acceptedHelperId
         self.aiCategory = aiCategory
         self.aiCategoryName = aiCategoryName
         self.aiCategoryIcon = aiCategoryIcon
@@ -329,7 +331,7 @@ struct Place: Identifiable, Codable, Equatable {
            let urgency = UrgencyLevel(rawValue: urgencyString) {
             urgencyLevel = urgency
         } else {
-            print("⚠️ Could not decode urgency level, using default")
+            print("âš ï¸ Could not decode urgency level, using default")
             urgencyLevel = .medium
         }
         
@@ -338,7 +340,7 @@ struct Place: Identifiable, Codable, Equatable {
            let requestStatus = RequestStatus(rawValue: statusString) {
             status = requestStatus
         } else {
-            print("⚠️ Could not decode status, using default")
+            print("âš ï¸ Could not decode status, using default")
             status = .open
         }
         
@@ -358,6 +360,8 @@ struct Place: Identifiable, Codable, Equatable {
         }
         
         isCurrentUserHelping = try container.decodeIfPresent(Bool.self, forKey: .isCurrentUserHelping) ?? false
+        
+        acceptedHelperId = try container.decodeIfPresent(String.self, forKey: .acceptedHelperId)
         
         // Decode AI fields (all optional)
         if let categoryString = try? container.decode(String.self, forKey: .aiCategory) {
@@ -395,6 +399,7 @@ struct Place: Identifiable, Codable, Equatable {
         try container.encode(authorName, forKey: .authorName)
         try container.encode(helpersCount, forKey: .helpersCount)
         try container.encode(isCurrentUserHelping, forKey: .isCurrentUserHelping)
+        try container.encodeIfPresent(acceptedHelperId, forKey: .acceptedHelperId)
         try container.encodeIfPresent(aiCategory?.rawValue, forKey: .aiCategory)
         try container.encodeIfPresent(aiCategoryName, forKey: .aiCategoryName)
         try container.encodeIfPresent(aiCategoryIcon, forKey: .aiCategoryIcon)

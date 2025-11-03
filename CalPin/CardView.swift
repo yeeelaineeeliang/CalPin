@@ -14,6 +14,7 @@ struct CardView: View {
     @State private var showingContactInfo = false
     @State private var showingSuccess = false
     @State private var successMessage = ""
+    @State private var showingHelpersList = false
     
     @EnvironmentObject var userSession: UserSession
     
@@ -68,6 +69,9 @@ struct CardView: View {
         }
         .sheet(isPresented: $showingContactInfo) {
             ContactInfoView(place: place)
+        }
+        .sheet(isPresented: $showingHelpersList) {
+            HelpersListView(place: place, userToken: userToken)
         }
     }
     
@@ -301,28 +305,90 @@ struct CardView: View {
     // Action Buttons View
     private var actionButtonsView: some View {
         HStack(spacing: 12) {
-            // Contact info button
-            Button(action: {
-                showingContactInfo = true
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "envelope")
-                        .font(.caption)
-                    Text("Contact")
-                        .font(.caption)
-                        .fontWeight(.medium)
+            // Contact button - show for helpers or for requesters when request is in progress
+            if (place.isCurrentUserHelping || (isOwnRequest && place.status == .inProgress)) && !place.contact.isEmpty {
+                Button(action: { showingContactInfo = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "envelope.fill")
+                            .font(.caption)
+                        Text("Contact")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(berkeleyBlue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(berkeleyBlue.opacity(0.1))
+                    .cornerRadius(8)
                 }
-                .foregroundColor(berkeleyBlue)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(berkeleyBlue.opacity(0.1))
-                .cornerRadius(8)
             }
             
             Spacer()
             
-            // Main action button (dynamic based on state)
-            if place.isCurrentUserHelping {
+            // REQUESTER BUTTONS (when viewing own request)
+            if isOwnRequest {
+                if place.status == .open {
+                    // View Helpers button
+                    Button(action: { showingHelpersList = true }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.2.fill")
+                                .font(.caption)
+                            Text("View Offers")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                            if place.helpersCount > 0 {
+                                Text("(\(place.helpersCount))")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(place.helpersCount > 0 ? californiaGold : Color.gray)
+                        .cornerRadius(12)
+                    }
+                } else if place.status == .inProgress {
+                    // Mark as Complete button
+                    Button(action: completeRequest) {
+                        HStack(spacing: 6) {
+                            if isOfferingHelp {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.caption)
+                                Text("Mark Complete")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.green)
+                        .cornerRadius(12)
+                    }
+                    .disabled(isOfferingHelp)
+                } else {
+                    // Status indicator for completed/cancelled
+                    HStack(spacing: 6) {
+                        Image(systemName: place.status.icon)
+                            .font(.caption)
+                        Text(place.status.displayName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(place.status.color)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(place.status.color.opacity(0.1))
+                    .cornerRadius(12)
+                }
+            }
+            // HELPER BUTTONS (when helping with someone else's request)
+            else if place.isCurrentUserHelping {
                 if place.canBeCompleted {
                     // Complete help button
                     Button(action: completeHelp) {
@@ -361,22 +427,9 @@ struct CardView: View {
                     .background(californiaGold)
                     .cornerRadius(12)
                 }
-            } else if isOwnRequest {
-                // Own request - cannot offer help
-                HStack(spacing: 6) {
-                    Image(systemName: "person.circle.fill")
-                        .font(.caption)
-                    Text("Your Request")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.secondary.opacity(0.1))
-                .cornerRadius(12)
-            } else if canOfferHelp {
-                // Offer help button for other users' open requests
+            }
+            // OFFER HELP BUTTON (for other users' open requests)
+            else if canOfferHelp {
                 Button(action: offerHelp) {
                     HStack(spacing: 6) {
                         if isOfferingHelp {
@@ -431,7 +484,7 @@ struct CardView: View {
     
     private func offerHelp() {
         guard !userToken.isEmpty else {
-            print("❌ No token available for offering help")
+            print("âŒ No token available for offering help")
             return
         }
         
@@ -460,7 +513,7 @@ struct CardView: View {
                 
                 switch response.result {
                 case .success:
-                    print("✅ Successfully offered help for request: \(place.id)")
+                    print("âœ… Successfully offered help for request: \(place.id)")
                     successMessage = "Help offered successfully! The requester will be notified."
                     showingSuccess = true
                     
@@ -468,10 +521,10 @@ struct CardView: View {
                     NotificationCenter.default.post(name: NSNotification.Name("RefreshRequests"), object: nil)
                     
                 case .failure(let error):
-                    print("❌ Failed to offer help: \(error)")
+                    print("âŒ Failed to offer help: \(error)")
                     if let data = response.data,
                        let errorString = String(data: data, encoding: .utf8) {
-                        print("❌ Server response: \(errorString)")
+                        print("âŒ Server response: \(errorString)")
                         
                         // Handle specific error messages from backend
                         if errorString.contains("cannot offer help on your own request") {
@@ -492,7 +545,7 @@ struct CardView: View {
     
     private func completeHelp() {
         guard !userToken.isEmpty else {
-            print("❌ No token available for completing help")
+            print("âŒ No token available for completing help")
             return
         }
         
@@ -514,7 +567,7 @@ struct CardView: View {
                 
                 switch response.result {
                 case .success:
-                    print("✅ Successfully completed help for request: \(place.id)")
+                    print("âœ… Successfully completed help for request: \(place.id)")
                     successMessage = "Help marked as complete! Thank you for helping a fellow student."
                     showingSuccess = true
                     
@@ -522,13 +575,61 @@ struct CardView: View {
                     NotificationCenter.default.post(name: NSNotification.Name("RefreshRequests"), object: nil)
                     
                 case .failure(let error):
-                    print("❌ Failed to complete help: \(error)")
+                    print("âŒ Failed to complete help: \(error)")
+                    if let data = response.data,
+                       let errorString = String(data: data, encoding: .utf8) {
+                        print("âŒ Server response: \(errorString)")
+                    }
+                    
+                    successMessage = "Failed to complete help. Please try again."
+                    showingSuccess = true
+                }
+            }
+        }
+    }
+    
+    // Complete request (for requester)
+    private func completeRequest() {
+        guard !userToken.isEmpty else {
+            print("❌ No token available for completing request")
+            return
+        }
+        
+        isOfferingHelp = true
+        
+        let headers: HTTPHeaders = [
+            "Authorization": "Bearer \(userToken)",
+            "Content-Type": "application/json"
+        ]
+        
+        let apiURL = NetworkConfig.baseURL
+        
+        AF.request(
+            "\(apiURL)/api/requests/\(place.id)/complete",
+            method: .post,
+            headers: headers
+        )
+        .responseJSON { response in
+            DispatchQueue.main.async {
+                self.isOfferingHelp = false
+                
+                switch response.result {
+                case .success:
+                    print("✅ Successfully completed request: \(place.id)")
+                    successMessage = "Request marked as complete! Thank you for using CalPin."
+                    showingSuccess = true
+                    
+                    // Trigger a refresh of the data
+                    NotificationCenter.default.post(name: NSNotification.Name("RefreshRequests"), object: nil)
+                    
+                case .failure(let error):
+                    print("❌ Failed to complete request: \(error)")
                     if let data = response.data,
                        let errorString = String(data: data, encoding: .utf8) {
                         print("❌ Server response: \(errorString)")
                     }
                     
-                    successMessage = "Failed to complete help. Please try again."
+                    successMessage = "Failed to complete request. Please try again."
                     showingSuccess = true
                 }
             }
@@ -670,10 +771,10 @@ struct ContactInfoView: View {
                         }
                         
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("• Meet in public places on campus")
-                            Text("• Trust your instincts")
-                            Text("• Let someone know where you're going")
-                            Text("• Use Berkeley email for verification")
+                            Text("â€¢ Meet in public places on campus")
+                            Text("â€¢ Trust your instincts")
+                            Text("â€¢ Let someone know where you're going")
+                            Text("â€¢ Use Berkeley email for verification")
                         }
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -706,6 +807,3 @@ struct ContactInfoView: View {
         }
     }
 }
-
-
-

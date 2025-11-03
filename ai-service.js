@@ -261,7 +261,7 @@ class AIService {
    */
   async improveRequest(title, description) {
     try {
-      const prompt = `You are helping a UC Berkeley student write a clearer help request. Make their request more effective while keeping their original intent.
+      const prompt = `You are helping a UC Berkeley student write a clearer help request, including grammar checks, refine the sentences. Make their request more effective while keeping their original intent.
 
 Original Title: ${title}
 Original Description: ${description}

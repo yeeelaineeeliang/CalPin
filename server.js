@@ -1463,8 +1463,6 @@ app.get('/api/ai/chat-history', authenticateToken, async (req, res) => {
 // POST /api/rephrase - Improve request description with AI
 app.post('/api/rephrase', authenticateToken, async (req, res) => {
   try {
-    console.log('Rephrasing request...');
-    
     const { title, description } = req.body;
     
     if (!title || !description) {
@@ -1473,10 +1471,8 @@ app.post('/api/rephrase', authenticateToken, async (req, res) => {
       });
     }
 
-    // Use existing improveRequest method
     const improved = await aiService.improveRequest(title, description);
     
-    console.log('Rephrased successfully');
     res.json({
       originalTitle: title,
       originalDescription: description,

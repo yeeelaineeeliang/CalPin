@@ -131,7 +131,6 @@ struct ActivityTimelineItem: Codable, Identifiable {
     }
 }
 
-// MARK: - Enhanced Profile View
 struct ProfileView: View {
     let userName: String
     let userEmail: String
@@ -200,7 +199,6 @@ struct ProfileView: View {
         }
     }
     
-    // MARK: - Profile Header
     private var profileHeaderView: some View {
         VStack(spacing: 16) {
             // Avatar with streak indicator
@@ -299,7 +297,7 @@ struct ProfileView: View {
         .cornerRadius(12)
     }
     
-    // MARK: - Stats Content
+    // Stats Content
     private var statsContentView: some View {
         VStack(alignment: .leading, spacing: 16) {
             if isLoadingStats {
@@ -694,7 +692,6 @@ struct ProfileView: View {
             "Content-Type": "application/json"
         ]
         
-        // Create decoder with ISO8601 date strategy
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         

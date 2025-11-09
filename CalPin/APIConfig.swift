@@ -23,22 +23,22 @@ struct NetworkConfig {
         health: "/health",
     )
     
-    // Helper method to construct offer help URL
+    // offer help URL
     static func offerHelpURL(for requestId: String) -> String {
         return "\(baseURL)\(String(format: endpoints.offerHelp, requestId))"
     }
     
-    // Helper method to construct update status URL
+    // update status URL
     static func updateStatusURL(for requestId: String) -> String {
         return "\(baseURL)\(String(format: endpoints.updateStatus, requestId))"
     }
     
-    // Helper method to construct complete help URL
+    // complete help URL
     static func completeHelpURL(for requestId: String) -> String {
         return "\(baseURL)\(String(format: endpoints.completeHelp, requestId))"
     }
     
-    // Helper method to construct confirm completion URL
+    //  confirm completion URL
     static func confirmCompletionURL(for requestId: String) -> String {
         return "\(baseURL)\(String(format: endpoints.confirmCompletion, requestId))"
     }

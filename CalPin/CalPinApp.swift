@@ -21,7 +21,6 @@ struct CalPinApp: App {
         print("Configuring Google Sign-In with client ID from plist: \(clientId)")
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientId)
         
-        // Optional: Print the reversed client ID for URL scheme verification
         if let reversedClientId = plist["REVERSED_CLIENT_ID"] as? String {
             print("URL Scheme should be: \(reversedClientId)")
         }

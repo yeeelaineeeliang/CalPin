@@ -127,7 +127,6 @@ struct CategoryFilterView: View {
     }
 }
 
-// MARK: - Category Chip Component
 struct CategoryChip: View {
     let title: String
     let icon: String

@@ -343,7 +343,6 @@ struct ContentView: View {
         )
     }
     
-    // MARK: - Enhanced Data Management
     
     // Enhanced data refresh handler
     private func handleDataRefresh() {
@@ -541,7 +540,6 @@ class UserSession: ObservableObject {
     }
 }
 
-// MARK: - Preview
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         ContentView()

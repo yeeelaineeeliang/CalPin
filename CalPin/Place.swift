@@ -331,7 +331,7 @@ struct Place: Identifiable, Codable, Equatable {
            let urgency = UrgencyLevel(rawValue: urgencyString) {
             urgencyLevel = urgency
         } else {
-            print("âš ï¸ Could not decode urgency level, using default")
+            print("⚠️ Could not decode urgency level, using default")
             urgencyLevel = .medium
         }
         
@@ -340,7 +340,7 @@ struct Place: Identifiable, Codable, Equatable {
            let requestStatus = RequestStatus(rawValue: statusString) {
             status = requestStatus
         } else {
-            print("âš ï¸ Could not decode status, using default")
+            print("⚠️ Could not decode status, using default")
             status = .open
         }
         

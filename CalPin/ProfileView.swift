@@ -219,14 +219,14 @@ struct ProfileView: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            ZStack {
-                                Circle()
-                                    .fill(californiaGold)
-                                    .frame(width: 32, height: 32)
-                                
-                                Text("ðŸ”¥")
-                                    .font(.system(size: 16))
-                            }
+                                ZStack {
+                                    Circle()
+                                        .fill(californiaGold)
+                                        .frame(width: 32, height: 32)
+                                    
+                                    Text("🔥")
+                                        .font(.system(size: 16))
+                                }
                         }
                     }
                     .frame(width: 100, height: 100)
@@ -878,6 +878,19 @@ struct AchievementRowView: View {
     
     private let californiaGold = Color(red: 253/255, green: 181/255, blue: 21/255)
     
+    private var displayIcon: String {
+        switch achievement.id {
+        case "first_help": return "🤝"
+        case "helper_5": return "⭐"
+        case "helper_25": return "🌟"
+        case "streak_1": return "🔥"
+        case "streak_4": return "🏆"
+        case "points_100": return "💎"
+        case "requester": return "🙋‍♂️"
+        default: return achievement.icon
+        }
+    }
+    
     var body: some View {
         HStack(spacing: 12) {
             // Achievement icon
@@ -886,7 +899,7 @@ struct AchievementRowView: View {
                     .fill(achievement.earned ? californiaGold.opacity(0.2) : Color.gray.opacity(0.1))
                     .frame(width: 50, height: 50)
                 
-                Text(achievement.icon)
+                Text(displayIcon)
                     .font(.title2)
                     .opacity(achievement.earned ? 1.0 : 0.5)
             }

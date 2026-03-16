@@ -138,16 +138,14 @@ struct CategoryChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                // Icon (emoji or SF Symbol)
-                if icon.count == 1 || icon.contains("\\u") {
-                    // It's an emoji
-                    Text(icon)
-                        .font(.title3)
-                } else {
-                    // It's an SF Symbol
+                // Icon: treat as SF Symbol only if it matches SF Symbol style; otherwise render as emoji/text.
+                if icon.range(of: "^[a-z0-9.]+$", options: [.regularExpression, .caseInsensitive]) != nil {
                     Image(systemName: icon)
                         .font(.body)
                         .foregroundColor(isSelected ? .white : color)
+                } else {
+                    Text(icon.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .font(.title3)
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {

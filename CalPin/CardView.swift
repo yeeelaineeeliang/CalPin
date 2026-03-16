@@ -80,7 +80,8 @@ struct CardView: View {
             HStack(spacing: 8) {
                 // Category icon and name
                 HStack(spacing: 6) {
-                    Text(place.aiCategoryIcon ?? place.category.icon)
+                    // Always use local emoji mapping so icons never depend on backend text encoding
+                    Text(place.category.icon)
                         .font(.title3)
                     
                     Text(place.aiCategoryName ?? place.category.displayName)

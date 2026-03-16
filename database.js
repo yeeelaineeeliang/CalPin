@@ -1,9 +1,12 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// Prefer internal URL on Render to avoid ENETUNREACH (IPv6). Use Internal connection string from DB Connect menu.
+const connectionString = process.env.INTERNAL_DATABASE_URL || process.env.DATABASE_URL;
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? 
+  connectionString,
+  ssl: process.env.NODE_ENV === 'production' ?
     { rejectUnauthorized: false } : false
 });
 

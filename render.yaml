@@ -1,0 +1,29 @@
+# CalPin Backend - Render Blueprint
+# 1. In Render Dashboard: New > Blueprint, connect this repo.
+# 2. Set GOOGLE_CLIENT_ID and ANTHROPIC_API_KEY in the web service Environment.
+# 3. Database: use same region as web service. Blueprint's connectionString is internal (private network).
+
+databases:
+  - name: calpin-db
+    plan: free
+    databaseName: calpin
+
+services:
+  - type: web
+    runtime: node
+    name: calpin
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Must be internal URL (Blueprint injects internal). If you set DATABASE_URL manually, use Connect > Internal on the DB.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: calpin-db
+          property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false

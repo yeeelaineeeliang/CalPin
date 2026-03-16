@@ -16,12 +16,8 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
 }));
 
-// Debug middleware to log incoming requests
 app.use((req, res, next) => {
-  console.log(`\n[${new Date().toISOString()}] ${req.method} ${req.url}`);
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Content-Type:', req.get('Content-Type'));
-  console.log('Authorization:', req.get('Authorization') ? 'Bearer ' + req.get('Authorization').substring(7, 20) + '...' : 'None');
+  console.log(`${req.method} ${req.url}`);
   next();
 });
 
@@ -34,17 +30,6 @@ app.use(express.urlencoded({
   extended: true, 
   limit: '10mb' 
 }));
-
-// Debug middleware to log parsed body
-app.use((req, res, next) => {
-  if (req.method === 'POST' || req.method === 'PUT') {
-    console.log('  Raw Body Length:', req.get('Content-Length') || 'Unknown');
-    console.log('  Parsed Body:', JSON.stringify(req.body, null, 2));
-    console.log('  Body Type:', typeof req.body);
-    console.log('  Body Keys:', Object.keys(req.body || {}));
-  }
-  next();
-});
 
 // Fallback requests for in-memory storage (only used if database fails)
 let fallbackRequests = [];
@@ -80,38 +65,24 @@ async function startServer() {
 // Utility function to verify Google token
 async function verifyGoogleToken(token) {
   try {
-    console.log('Verifying Google token...');
-    console.log('Token length:', token.length);
-    console.log('Token starts with:', token.substring(0, 50) + '...');
-    
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
     const payload = ticket.getPayload();
-    
-    console.log('🔍 Token payload received:', {
-      email: payload.email,
-      name: payload.name,
-      sub: payload.sub,
-      aud: payload.aud,
-      iss: payload.iss
-    });
-    
+
     // Verify it's a Berkeley email
-    if (!payload.email.endsWith('@berkeley.edu') && 
+    if (!payload.email.endsWith('@berkeley.edu') &&
         !payload.email.endsWith('@student.berkeley.edu')) {
       throw new Error('Must use Berkeley email');
     }
-    
-    console.log('  Token verified for:', payload.email);
+
     return {
       id: payload.sub,
       email: payload.email,
       name: payload.name
     };
   } catch (error) {
-    console.log('  Token verification failed:', error.message);
     throw new Error('Invalid token');
   }
 }
@@ -121,12 +92,7 @@ async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.replace('Bearer ', '');
 
-  console.log('Auth check - Header present:', !!authHeader);
-  console.log('Auth check - Token extracted:', !!token);
-  console.log('Auth check - Token length:', token ? token.length : 0);
-
   if (!token) {
-    console.log('  No token provided');
     return res.status(401).json({ error: 'Access token required' });
   }
 
@@ -138,20 +104,17 @@ async function authenticateToken(req, res, next) {
       try {
         await db.upsertUser({
           id: user.id,
-          email: user.email, 
+          email: user.email,
           name: user.name
         });
-        console.log('User upserted in database:', user.email);
       } catch (dbError) {
-        console.log('Could not upsert user in database:', dbError.message);
+        // Non-fatal: continue with auth
       }
     }
-    
+
     req.user = user;
-    console.log('  User authenticated:', user.email);
     next();
   } catch (error) {
-    console.error('  Auth error:', error.message);
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 }
@@ -172,8 +135,6 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 // Enhanced health check
 app.get('/health', async (req, res) => {
-  console.log('Health check requested');
-  
   let requestCount = 0;
   let dbStatus = 'disconnected';
   let dbError = null;
@@ -190,12 +151,9 @@ app.get('/health', async (req, res) => {
         const userResult = await db.pool.query('SELECT COUNT(*) FROM users');
         userCount = parseInt(userResult.rows[0].count);
       } catch (userError) {
-        console.log('  Could not get user count:', userError.message);
+        // ignore
       }
-      
-      console.log('  Database health check passed');
     } catch (error) {
-      console.log('  Database health check failed:', error.message);
       requestCount = fallbackRequests.length;
       dbStatus = 'error';
       dbError = error.message;
@@ -220,16 +178,12 @@ app.get('/health', async (req, res) => {
 // GET /api/fetch - Retrieve all help requests WITH HELPER STATUS
 app.get('/api/fetch', authenticateToken, async (req, res) => {
   try {
-    console.log('Fetching requests for user:', req.user.email);
-    
     let activeRequests = [];
-    
+
     if (databaseConnected) {
       try {
-        console.log('Fetching from database...');
         activeRequests = await db.getActiveRequests();
-        console.log(`Found ${activeRequests.length} requests in database`);
-        
+
         // Check which requests the current user is helping with
         const userId = req.user.id;
         if (activeRequests.length > 0) {
@@ -238,12 +192,10 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
             FROM help_offers 
             WHERE helper_id = $1 AND request_id = ANY($2::int[])
           `;
-          
+
           const requestIds = activeRequests.map(r => parseInt(r.id));
           const helpResult = await db.pool.query(helpCheckQuery, [userId, requestIds]);
           const helpingRequestIds = new Set(helpResult.rows.map(row => row.request_id.toString()));
-          
-          console.log(`User ${userId} is helping with requests:`, Array.from(helpingRequestIds));
           
           // Add helping status to each request
           activeRequests = activeRequests.map(request => ({
@@ -253,8 +205,6 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }
         
       } catch (dbError) {
-        console.log('Database fetch failed:', dbError.message);
-        console.log('Falling back to in-memory storage');
         const now = new Date();
         activeRequests = fallbackRequests.filter(request => {
           const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -265,7 +215,6 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
         }));
       }
     } else {
-      console.log('Using fallback in-memory storage');
       const now = new Date();
       activeRequests = fallbackRequests.filter(request => {
         const hoursSinceCreated = (now - new Date(request.createdAt)) / (1000 * 60 * 60);
@@ -283,7 +232,6 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
     let responseRequests = activeRequests;
     
     if (userLat && userLon) {
-      console.log(' Calculating distances from user location:', { userLat, userLon });
       responseRequests = activeRequests.map(request => ({
         ...request,
         distance: calculateDistance(userLat, userLon, request.latitude, request.longitude).toFixed(1) + 'mi',
@@ -297,10 +245,9 @@ app.get('/api/fetch', authenticateToken, async (req, res) => {
       }));
     }
 
-    console.log('Returning', responseRequests.length, 'active requests with helper status');
     res.json(responseRequests);
   } catch (error) {
-    console.error('  Fetch error:', error);
+    console.error('Fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch requests' });
   }
 });
@@ -311,8 +258,6 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
     const requestId = req.params.id;
     const userId = req.user.id;
 
-    console.log(' Checking helper status - Request ID:', requestId, 'User:', req.user.email);
-
     if (databaseConnected) {
       try {
         // Check if user is already helping with this request
@@ -322,15 +267,13 @@ app.get('/api/requests/:id/helper-status', authenticateToken, async (req, res) =
         );
         
         const isHelping = result.rows.length > 0;
-        console.log(`  Helper status check: User ${userId} is ${isHelping ? 'helping' : 'not helping'} with request ${requestId}`);
-        
         res.json({
           isHelping: isHelping,
           helpOfferedAt: isHelping ? result.rows[0].created_at : null
         });
         return;
       } catch (dbError) {
-        console.log('  Database helper status check failed:', dbError.message);
+        // fall through to fallback
       }
     }
 
@@ -359,12 +302,9 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     const userId = req.user.id;
     const userName = req.user.name;
 
-    console.log(' User offering help:', req.user.email, 'for request:', requestId);
-
     if (databaseConnected) {
       try {
         const result = await db.offerHelp(requestId, userId, userName);
-        console.log('  Help offered successfully in database');
         res.json({ 
           success: true, 
           message: 'Help offered successfully',
@@ -376,7 +316,6 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
         if (dbError.message && dbError.message.includes('duplicate key')) {
           return res.status(400).json({ error: 'You are already helping with this request' });
         }
-        console.log('  Database offer help failed:', dbError.message);
       }
     }
 
@@ -407,8 +346,7 @@ app.post('/api/requests/:id/offer-help', authenticateToken, async (req, res) => 
     }
     
     request.updatedAt = new Date();
-    
-    console.log('Help offered using fallback storage');
+
     res.json({ 
       success: true, 
       message: 'Help offered successfully',
@@ -428,8 +366,6 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
     const requestId = req.params.id;
     const helperId = req.user.id;
     const helperName = req.user.name;
-
-    console.log('Helper completing help - Request ID:', requestId, 'Helper:', req.user.email);
 
     if (databaseConnected) {
       try {
@@ -490,9 +426,7 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
           }
           
           await client.query('COMMIT');
-          
-          console.log(`Helper ${helperId} marked help as complete for request ${requestId}`);
-          
+
           res.json({
             success: true,
             message: 'Help marked as complete',
@@ -508,7 +442,6 @@ app.post('/api/requests/:id/complete-help', authenticateToken, async (req, res) 
         }
         
       } catch (dbError) {
-        console.log('  Database complete help failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -559,8 +492,6 @@ app.get('/api/requests/:id/helpers', authenticateToken, async (req, res) => {
     const requestId = req.params.id;
     const userId = req.user.id;
 
-    console.log('📋 Fetching helpers for request:', requestId);
-
     if (!databaseConnected) {
       return res.status(503).json({ error: 'Database not available' });
     }
@@ -580,9 +511,6 @@ app.get('/api/requests/:id/helpers', authenticateToken, async (req, res) => {
     }
 
     const helpers = await db.getHelpersForRequest(requestId);
-    
-    console.log(`  Found ${helpers.length} helpers for request ${requestId}`);
-    
     res.json({
       helpers: helpers.map(h => ({
         id: h.helper_id,
@@ -607,8 +535,6 @@ app.post('/api/requests/:id/accept-helper', authenticateToken, async (req, res) 
     const userId = req.user.id;
     const { helperId } = req.body;
 
-    console.log('✅ Accepting helper - Request:', requestId, 'Helper:', helperId);
-
     if (!helperId) {
       return res.status(400).json({ error: 'Helper ID is required' });
     }
@@ -618,9 +544,6 @@ app.post('/api/requests/:id/accept-helper', authenticateToken, async (req, res) 
     }
 
     const updatedRequest = await db.acceptHelper(requestId, helperId, userId);
-    
-    console.log(`  Helper ${helperId} accepted for request ${requestId}`);
-    
     res.json({
       success: true,
       message: 'Helper accepted successfully',
@@ -644,22 +567,11 @@ app.post('/api/requests/:id/complete', authenticateToken, async (req, res) => {
     const requestId = req.params.id;
     const userId = req.user.id;
 
-    console.log('Completing request:', requestId, 'by user:', req.user.email);
-
-    if (databaseConnected) {
-      const beforeResult = await db.pool.query('SELECT status FROM help_requests WHERE id = $1', [requestId]);
-      if (beforeResult.rows.length > 0) {
-        console.log('Status BEFORE:', beforeResult.rows[0].status);
-      }
-    }
     if (!databaseConnected) {
       return res.status(503).json({ error: 'Database not available' });
     }
 
     const updatedRequest = await db.completeRequest(requestId, userId);
-    
-    console.log(`  Request ${requestId} marked as completed`);
-    
     res.json({
       success: true,
       message: 'Request completed successfully',
@@ -684,16 +596,11 @@ app.post('/api/requests/:id/cancel-help', authenticateToken, async (req, res) =>
     const requestId = req.params.id;
     const helperId = req.user.id;
 
-    console.log('Cancelling help offer - Request:', requestId, 'Helper:', helperId);
-
     if (!databaseConnected) {
       return res.status(503).json({ error: 'Database not available' });
     }
 
     await db.cancelHelpOffer(requestId, helperId);
-    
-    console.log(`  Help offer cancelled for request ${requestId} by helper ${helperId}`);
-    
     res.json({
       success: true,
       message: 'Help offer cancelled successfully'
@@ -711,8 +618,6 @@ app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, 
     const requestId = req.params.id;
     const requesterId = req.user.id;
     const { confirmed, stillNeedHelp } = req.body;
-
-    console.log('🎯 Requester confirming completion - Request ID:', requestId, 'Confirmed:', confirmed);
 
     if (databaseConnected) {
       try {
@@ -760,7 +665,6 @@ app.post('/api/requests/:id/confirm-completion', authenticateToken, async (req, 
         }
         
       } catch (dbError) {
-        console.log('  Database confirm completion failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -798,8 +702,6 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
     const { status } = req.body;
     const userId = req.user.id;
 
-    console.log('Updating request status:', requestId, 'to:', status, 'by:', req.user.email);
-
     if (!['Open', 'In Progress', 'Completed', 'Cancelled'].includes(status)) {
       return res.status(400).json({ error: 'Invalid status' });
     }
@@ -810,8 +712,6 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
         if (!result) {
           return res.status(404).json({ error: 'Request not found or unauthorized' });
         }
-        
-        console.log('Request status updated in database');
         res.json({ 
           success: true, 
           message: 'Status updated successfully',
@@ -820,7 +720,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
         });
         return;
       } catch (dbError) {
-        console.log('Database status update failed:', dbError.message);
+        // fall through to fallback
       }
     }
 
@@ -831,8 +731,6 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
 
     fallbackRequests[requestIndex].status = status;
     fallbackRequests[requestIndex].updatedAt = new Date();
-    
-    console.log('Request status updated using fallback storage');
     res.json({ 
       success: true, 
       message: 'Status updated successfully',
@@ -849,12 +747,7 @@ app.put('/api/requests/:id/status', authenticateToken, async (req, res) => {
 app.get('/api/debug/my-stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    
-    console.log('DEBUG MY STATS');
-    console.log('User ID:', userId);
-    console.log('User ID type:', typeof userId);
-    console.log('User email:', req.user.email);
-    
+
     if (!databaseConnected) {
       return res.json({ error: 'Database not connected' });
     }
@@ -915,15 +808,10 @@ app.get('/api/debug/my-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// //  User statistics
+// User statistics
 app.get('/api/user/stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('===== FETCHING STATS =====');
-    console.log('User:', req.user.email);
-    console.log('User ID:', userId);
-    console.log('User ID Type:', typeof userId);
-    
     let stats = {
       requestsMade: 0,
       peopleHelped: 0,
@@ -944,31 +832,13 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
         const client = await db.pool.connect();
         
         try {
-          // DIAGNOSTIC: Check what author IDs exist
-          const authorCheck = await client.query(`
-            SELECT DISTINCT author_id, COUNT(*) as count
-            FROM help_requests
-            GROUP BY author_id
-          `);
-          console.log(' All author IDs in DB:', authorCheck.rows);
-          
-          // DIAGNOSTIC: Check this specific user
-          const userCheck = await client.query(`
-            SELECT id, title, author_id, created_at
-            FROM help_requests
-            WHERE author_id = $1
-          `, [userId]);
-          console.log(' Requests for this user ID:', userCheck.rows.length);
-          console.log(' Sample requests:', userCheck.rows.slice(0, 2));
-          
-          // Original query - 1. Get user's requests made
+          // 1. Get user's requests made
           const requestsResult = await client.query(
             'SELECT COUNT(*) as count, MIN(created_at) as first_request FROM help_requests WHERE author_id = $1',
             [userId]
           );
           stats.requestsMade = parseInt(requestsResult.rows[0].count) || 0;
-          console.log('Requests made:', stats.requestsMade);
-          
+
           // 2. Get help offers made by user (people helped)
           const helpResult = await client.query(`
             SELECT COUNT(DISTINCT ho.request_id) as unique_requests_helped,
@@ -980,8 +850,6 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           
           const helpStats = helpResult.rows[0];
           stats.peopleHelped = parseInt(helpStats.unique_requests_helped) || 0;
-          console.log(' People helped:', stats.peopleHelped);
-          
           if (helpStats.last_help_offered) {
             stats.lastActivity = new Date(helpStats.last_help_offered).toISOString();
           }
@@ -997,8 +865,7 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 
           // 4. Calculate community points
           stats.communityPoints = stats.peopleHelped * 10 + stats.requestsMade * 2;
-          console.log(' Community points:', stats.communityPoints);
-          
+
           // 5. Get user join date
           const userResult = await client.query(
             'SELECT created_at FROM users WHERE id = $1',
@@ -1008,13 +875,8 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
           if (userResult.rows.length > 0) {
             stats.joinDate = userResult.rows[0].created_at.toISOString();
           } else {
-            console.log('⚠️ User not found in users table!');
             stats.joinDate = new Date().toISOString();
           }
-          
-          console.log(' Final stats:', stats);
-          console.log(' ===== STATS COMPLETE =====');
-          
         } finally {
           client.release();
         }
@@ -1037,8 +899,6 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 app.get('/api/user/achievements', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('Fetching achievements for user:', req.user.email);
-
     let achievements = [];
 
     if (databaseConnected) {
@@ -1154,11 +1014,9 @@ app.get('/api/user/achievements', authenticateToken, async (req, res) => {
         achievements = achievementCriteria;
 
       } catch (error) {
-        console.log('  Achievement calculation failed:', error.message);
+        // use empty achievements
       }
     }
-
-    console.log(`  Returning ${achievements.length} achievements`);
     res.json(achievements);
   } catch (error) {
     console.error('  Achievements error:', error);
@@ -1171,9 +1029,6 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     const limit = parseInt(req.query.limit) || 20;
-    
-    console.log('Fetching activity timeline for user:', req.user.email);
-
     let timeline = [];
 
     if (databaseConnected) {
@@ -1218,8 +1073,6 @@ app.get('/api/user/activity-timeline', authenticateToken, async (req, res) => {
           statusChange: row.status_change
         }));
 
-        console.log(`  Activity timeline: ${timeline.length} items`);
-
       } catch (dbError) {
         console.log('  Timeline query failed:', dbError.message);
       }
@@ -1236,12 +1089,10 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
     
-    console.log('📚 Fetching history for user:', req.user.email);
-
     if (databaseConnected) {
       try {
         // Get requests user created
-        const createdRequestsResult = await pool.query(`
+        const createdRequestsResult = await db.pool.query(`
           SELECT r.*, 
                  COALESCE(h.helpers_count, 0) as helpers_count,
                  COALESCE(h.completed_helpers, 0) as completed_helpers
@@ -1258,7 +1109,7 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
         `, [userId]);
         
         // Get requests user helped with
-        const helpedRequestsResult = await pool.query(`
+        const helpedRequestsResult = await db.pool.query(`
           SELECT r.*, ho.status as help_status, ho.created_at as help_offered_at, 
                  ho.completed_at, COALESCE(h.helpers_count, 0) as helpers_count
           FROM help_requests r
@@ -1304,7 +1155,6 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
         });
         
       } catch (dbError) {
-        console.log('  Database history fetch failed:', dbError.message);
         return res.status(500).json({ error: 'Database error' });
       }
     } else {
@@ -1333,12 +1183,6 @@ app.get('/api/user/history', authenticateToken, async (req, res) => {
 
 // Test endpoint for debugging
 app.post('/api/test', (req, res) => {
-  console.log('\n  === TEST ENDPOINT ===');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  console.log('Raw body type:', typeof req.body);
-  console.log('=== END TEST ===\n');
-  
   res.json({
     message: 'Test endpoint reached',
     receivedBody: req.body,
@@ -1378,8 +1222,6 @@ app.get('/api/debug/database', authenticateToken, async (req, res) => {
 // Debug endpoint to check database state
 app.get('/api/debug/requests', authenticateToken, async (req, res) => {
   try {
-    console.log('🔧 Debug endpoint called by:', req.user.email);
-    
     if (!databaseConnected) {
       return res.json({
         error: 'Database not connected',
@@ -1473,10 +1315,7 @@ app.get('/api/debug/requests', authenticateToken, async (req, res) => {
 // Simplified test endpoint to check basic functionality
 app.get('/api/test-fetch', authenticateToken, async (req, res) => {
   try {
-    console.log('  Test fetch called');
-    
     if (databaseConnected) {
-      // Simple direct query without complex joins
       const result = await db.pool.query(`
         SELECT id, title, latitude, longitude, status, created_at
         FROM help_requests 
@@ -1484,9 +1323,6 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
         ORDER BY created_at DESC
         LIMIT 5
       `);
-      
-      console.log(`  Direct query returned ${result.rows.length} rows`);
-      
       const simpleMapped = result.rows.map(row => ({
         id: row.id.toString(),
         title: row.title,
@@ -1518,9 +1354,6 @@ app.get('/api/test-fetch', authenticateToken, async (req, res) => {
 // Integrate AI
 app.post('/api/create', authenticateToken, async (req, res) => {
   try {
-    console.log('📝 Creating new help request...');
-    console.log('Request body:', req.body);
-    
     const { title, description, latitude, longitude, contact, urgencyLevel } = req.body;
     
     // Validation
@@ -1532,11 +1365,8 @@ app.post('/api/create', authenticateToken, async (req, res) => {
     }
 
     // SAFETY CHECK FIRST
-    console.log('Performing safety check...');
     const safetyResult = await aiService.performSafetyCheck(title, description);
-    
     if (!safetyResult.isSafe) {
-      console.log('Request flagged as unsafe:', safetyResult.flaggedCategory);
       return res.status(400).json({
         error: 'Request flagged',
         flagged: true,
@@ -1545,14 +1375,10 @@ app.post('/api/create', authenticateToken, async (req, res) => {
         severity: safetyResult.severity
       });
     }
-    console.log('Safety check passed');
 
-    // AI categorization 
-    console.log('Categorizing with AI...');
     const aiAnalysis = await aiService.categorizeRequest(title, description, urgencyLevel);
-    console.log('AI Analysis:', aiAnalysis);
 
-    // Create request in database 
+    // Create request in database
     const newRequest = await db.createRequest({
       title,
       description,
@@ -1574,8 +1400,6 @@ app.post('/api/create', authenticateToken, async (req, res) => {
       aiSafetyReason: null
     });
 
-    console.log('Request created successfully with ID:', newRequest.id);
-    
     res.status(201).json({
       message: 'Request created successfully',
       request: newRequest
@@ -1646,8 +1470,6 @@ app.post('/api/rephrase', authenticateToken, async (req, res) => {
 // Detect duplicate requests
 app.post('/api/ai/detect-duplicates', authenticateToken, async (req, res) => {
   try {
-    console.log('Detecting duplicates for user:', req.user.email);
-
     let requests = [];
     if (databaseConnected) {
       const result = await db.pool.query(`
@@ -1684,8 +1506,6 @@ app.post('/api/ai/detect-duplicates', authenticateToken, async (req, res) => {
 app.get('/api/ai/weekly-summary', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log(' Generating weekly summary for:', req.user.email);
-
     let stats = { thisWeek: 0, communityPoints: 0, streak: 0 };
     let activities = [];
 
@@ -1721,7 +1541,7 @@ app.get('/api/ai/weekly-summary', authenticateToken, async (req, res) => {
         activities = activityResult.rows;
 
       } catch (err) {
-        console.log('⚠️ Could not fetch weekly stats');
+        // use defaults
       }
     }
 
@@ -1806,8 +1626,6 @@ app.get('/api/requests/by-category/:category', authenticateToken, async (req, re
   try {
     const { category } = req.params;
     const userId = req.user.id;
-    
-    console.log(`Fetching ${category} requests for:`, req.user.email);
 
     if (!databaseConnected) {
       const filtered = fallbackRequests.filter(r => 
@@ -1884,8 +1702,7 @@ app.get('/api/ai/categories', authenticateToken, async (req, res) => {
 
 // Error handling middleware
 app.use((error, req, res, next) => {
-  console.error('Server error:', error);
-  console.error('Stack trace:', error.stack);
+  console.error('Server error:', error.message);
   res.status(500).json({ 
     error: 'Internal server error',
     message: error.message,
@@ -1895,7 +1712,6 @@ app.use((error, req, res, next) => {
 
 // 404 handler
 app.use((req, res) => {
-  console.log('404 - Endpoint not found:', req.method, req.url);
   res.status(404).json({ 
     error: 'Endpoint not found',
     method: req.method,
@@ -1907,10 +1723,6 @@ app.use((req, res) => {
 startServer().then(() => {
   app.listen(PORT, () => {
     console.log(`CalPin Backend running on port ${PORT}`);
-    console.log(`Health check: http://localhost:${PORT}/health`);
-    console.log(`Test endpoint: http://localhost:${PORT}/api/test`);
-    console.log(`Google Client ID configured: ${!!process.env.GOOGLE_CLIENT_ID}`);
-    console.log(`Database status: ${databaseConnected ? 'Connected' : 'Disconnected (using fallback)'}`);
-    console.log(`Ready for user requests`);
+    console.log(`Database: ${databaseConnected ? 'Connected' : 'Fallback (in-memory)'}`);
   });
 });

@@ -43,6 +43,4 @@ project.xcworkspace/xcuserdata/
 CalPin.xcodeproj/project.xcworkspace/xcuserdata/
 CalPin.xcodeproj/xcuserdata/
 
-# Railway
-.railway/
-.env
+.cursorrules

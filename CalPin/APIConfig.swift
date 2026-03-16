@@ -3,9 +3,9 @@ import Foundation
 
 struct NetworkConfig {
     #if DEBUG
-    static let baseURL = "https://calpin-production.up.railway.app" // For local development
+    static let baseURL = "https://calpin.onrender.com" // Render backend
     #else
-    static let baseURL = "https://calpin-production.up.railway.app" // Your Railway URL
+    static let baseURL = "https://calpin.onrender.com" // Render backend URL
     #endif
     
     static let endpoints = (

@@ -8,7 +8,16 @@ const aiService = require('./ai-service');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+function getAllowedGoogleClientIds() {
+  const ids = (process.env.GOOGLE_CLIENT_IDS || process.env.GOOGLE_CLIENT_ID || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  return ids;
+}
+
+const allowedGoogleClientIds = getAllowedGoogleClientIds();
+const client = new OAuth2Client(allowedGoogleClientIds[0]);
 
 app.use(cors({
   origin: '*',
@@ -67,7 +76,7 @@ async function verifyGoogleToken(token) {
   try {
     const ticket = await client.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: allowedGoogleClientIds.length > 0 ? allowedGoogleClientIds : undefined,
     });
     const payload = ticket.getPayload();
 
@@ -170,7 +179,8 @@ app.get('/health', async (req, res) => {
     database_status: dbStatus,
     database_error: dbError,
     environment: process.env.NODE_ENV || 'development',
-    google_client_configured: !!process.env.GOOGLE_CLIENT_ID,
+    google_client_configured: allowedGoogleClientIds.length > 0,
+    google_client_ids_configured: allowedGoogleClientIds.length,
     database_url_configured: !!process.env.DATABASE_URL
   });
 });

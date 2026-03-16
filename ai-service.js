@@ -34,6 +34,38 @@ class AIService {
     ];
   }
 
+  containsSpecificPII(text) {
+    const t = (text || '').toLowerCase();
+
+    // Email / phone
+    const emailRegex = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
+    const phoneRegex = /\b(?:\+?1[\s.-]?)?(?:\(\s*\d{3}\s*\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/;
+
+    // Coordinates
+    const coordRegex = /\b-?\d{1,3}\.\d{4,}\b/;
+
+    // US-style street address heuristics (number + street suffix)
+    const streetSuffixes = '(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|ct|court|pl|place|way|ter|terrace|pkwy|parkway)';
+    const addressRegex = new RegExp(`\\b\\d{1,6}\\s+[a-z0-9.'\\-\\s]{2,60}\\s+${streetSuffixes}\\b`, 'i');
+
+    // Apartment / unit (only meaningful if an address is present, but still a strong signal)
+    const unitRegex = /\b(apt|apartment|unit|suite|#)\s*\w+\b/i;
+
+    return (
+      emailRegex.test(t) ||
+      phoneRegex.test(t) ||
+      coordRegex.test(t) ||
+      addressRegex.test(t) ||
+      (unitRegex.test(t) && /\b\d{1,6}\b/.test(t))
+    );
+  }
+
+  containsOnlyGeneralLocation(text) {
+    // Mentions of neighborhoods/areas/cross-streets without a numbered address are okay.
+    // (e.g. "downtown berkeley", "telegraph", "near campus")
+    return !this.containsSpecificPII(text);
+  }
+
   /**
    * Categorize a help request using Claude
    * @param {string} title - Request title
@@ -167,18 +199,22 @@ CRITICAL: Respond ONLY with valid JSON, no markdown code blocks or other text.`;
 
     // Second: AI-powered context check (for nuanced cases)
     try {
-      const prompt = `Analyze this help request for safety and appropriateness for a student support app.
+      const prompt = `Analyze this help request for safety and appropriateness for a UC Berkeley student support app.
 
   Title: ${title}
   Description: ${description}
 
   Check for:
-  1. Personal identifying information (SSN, addresses, private data)
+  1. Personal identifying information (SSN, exact street addresses, phone numbers, private data)
   2. Substance-related requests (alcohol, drugs, prescriptions)
   3. Academic dishonesty (cheating, selling answers)
   4. Financial transactions (loans, money requests)
   5. Illegal activities
   6. Harassment or inappropriate content
+
+  IMPORTANT:
+  - General location mentions are allowed (e.g. "downtown Berkeley", "Telegraph", "near campus").
+  - Only flag location as personal info if it includes an exact address (street number + street name), apartment/unit, or similarly identifying details.
 
   Respond with JSON:
   {
@@ -203,6 +239,15 @@ CRITICAL: Respond ONLY with valid JSON, no markdown code blocks or other text.`;
       const result = JSON.parse(message.content[0].text);
       
       if (!result.isSafe) {
+        // Guardrail: don't block normal requests that only mention general areas.
+        if (
+          typeof result.flaggedCategory === 'string' &&
+          result.flaggedCategory.toLowerCase().includes('personal') &&
+          this.containsOnlyGeneralLocation(`${title} ${description}`)
+        ) {
+          return { isSafe: true, flaggedCategory: null, reason: null, severity: null };
+        }
+
         return {
           isSafe: false,
           flaggedCategory: result.flaggedCategory,
